@@ -123,6 +123,23 @@ ASAN_OPTIONS=detect_leaks=1 ./build/leak/leak_harness tests/models/add.pte 500
 
 Expect `leak_harness: 500 iters OK` and exit 0. A leak → non-zero exit → merge blocked.
 
+### 6. Race QA gate (TSan)
+
+A second native harness (`native_tests/race_harness.cpp`) drives the core from many threads under ThreadSanitizer — a **separate binary**, since TSan and ASan can't be combined in one build. It runs two scenarios: many threads sharing one `Runtime` (the per-`Runtime` mutex surface) and many threads each owning their own `Runtime`.
+
+```bash
+cmake -S native_tests -B build/race && cmake --build build/race --target race_harness
+setarch "$(uname -m)" -R \
+  env TSAN_OPTIONS="suppressions=native_tests/tsan_suppressions.txt" \
+  ./build/race/race_harness tests/models/add.pte 8 200
+```
+
+Expect `race_harness: ... OK` and exit 0; a data race → non-zero exit.
+
+- **`setarch -R` is required** on recent (6.x) kernels: high ASLR entropy (`vm.mmap_rnd_bits`) makes TSan abort with `FATAL: unexpected memory mapping`. `setarch -R` disables ASLR for the child process — no root needed.
+- **Scope — read before trusting a green run.** The prebuilt ExecuTorch libs are **not** TSan-instrumented, so this gate sees races in *our* code (`et_core`, the binding) but is **blind to races inside ExecuTorch itself** (`Module::methods_`, XNNPACK, pthreadpool). This was verified empirically: injecting an unsynchronized write into `run_method` **is** caught; removing the `method_meta`/`method_names` locks (whose race lives inside ExecuTorch's uninstrumented `methods_`) is **not**. So the gate protects synchronization of the data structures *we* own and guards against that regression class — it does **not** validate our serialization of ExecuTorch's internal state. Doing that would need a TSan-instrumented ExecuTorch build (the attested tarball isn't one).
+- `native_tests/tsan_suppressions.txt` quiets known-noisy uninstrumented frames; refine it per toolchain (none were needed on the reference build).
+
 ### Layout
 
 | Path | Responsibility |
@@ -130,7 +147,7 @@ Expect `leak_harness: 500 iters OK` and exit 0. A leak → non-zero exit → mer
 | `src/et_core/` | Binding-agnostic C++ core (ExecuTorch `Module` lifetime, arena copy-out, per-`Runtime` mutex). No Python/numpy headers. |
 | `src/binding/` | nanobind glue: numpy↔`EValue` marshalling, dtype table, GIL discipline, exception translation. |
 | `executorch_numpy_runtime/` | Pure-Python `Runtime`/`Program`/`Method`, `runtime_info()`, error hierarchy. |
-| `native_tests/` | ASan/LSan leak harness (links `et_core` directly, no Python). |
+| `native_tests/` | ASan/LSan leak harness + TSan race harness (link `et_core` directly, no Python) and the TSan suppressions file. |
 | `tools/export_fixtures.py` | Offline `.pte` fixture generation (torch env). |
 | `cmake/` | `RuntimePin.cmake` (runtime prefix), `assert_kernels_registered.cmake` (post-link guard). |
 

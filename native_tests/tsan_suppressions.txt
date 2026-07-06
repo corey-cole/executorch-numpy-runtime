@@ -1,0 +1,17 @@
+# ThreadSanitizer suppressions for the race_harness gate.
+#
+# The prebuilt ExecuTorch / XNNPACK / pthreadpool static libs are NOT TSan-instrumented, so
+# TSan can't observe their internal synchronization and may report false positives from their
+# frames. This gate targets race-freedom of et_core's OWN locking (RuntimeState/ForwardState,
+# the per-Runtime mutex, the arena copy-out), so we suppress reports whose stack sits in the
+# uninstrumented runtime libraries. A report in et_core.cpp / the binding is NOT suppressed
+# and will fail the gate.
+#
+# Use: TSAN_OPTIONS="suppressions=native_tests/tsan_suppressions.txt" ./build/race/race_harness ...
+# Refine empirically: run without suppressions first, then add only the uninstrumented frames
+# TSan actually reports on this toolchain.
+
+race:pthreadpool*
+race:xnnpack*
+race:cpuinfo*
+race:executorch::backends::xnnpack*
