@@ -6,7 +6,9 @@
 #include <executorch/extension/data_loader/buffer_data_loader.h>
 #include <executorch/extension/module/module.h>
 #include <executorch/extension/tensor/tensor.h>
+#include <executorch/runtime/backend/interface.h>
 #include <executorch/runtime/executor/method_meta.h>
+#include <executorch/runtime/kernel/operator_registry.h>
 
 namespace etnp {
 using executorch::extension::BufferDataLoader;
@@ -92,6 +94,46 @@ std::vector<std::string> Runtime::method_names() const {
   return out;
 }
 
+// Uses executorch::runtime::Result<MethodMeta> Module::method_meta(name)
+// (extension/module/module.h) and TensorInfo::sizes()/scalar_type()
+// (runtime/executor/method_meta.h) -- both verified against the installed
+// 1.3.1 headers. Non-tensor inputs/outputs (Int/Bool/Double/String tags)
+// have no TensorInfo, so input_tensor_meta()/output_tensor_meta() returns an
+// error for them; those slots get TensorMeta{{}, -1} placeholders.
+MethodMeta Runtime::method_meta(const std::string& name) const {
+  auto mm = state_->module->method_meta(name);
+  if (mm.error() != Error::Ok)
+    throw EtException({ErrorKind::Load, "method_meta('" + name + "') failed", ""});
+  etnp::MethodMeta out;
+  out.inputs.reserve(mm->num_inputs());
+  for (size_t i = 0; i < mm->num_inputs(); ++i) {
+    auto info = mm->input_tensor_meta(i);
+    if (info.error() == Error::Ok) {
+      TensorMeta tm;
+      tm.scalar_type = static_cast<int8_t>(info->scalar_type());
+      auto sizes = info->sizes();
+      tm.shape.assign(sizes.begin(), sizes.end());
+      out.inputs.push_back(std::move(tm));
+    } else {
+      out.inputs.push_back(TensorMeta{{}, -1});
+    }
+  }
+  out.outputs.reserve(mm->num_outputs());
+  for (size_t i = 0; i < mm->num_outputs(); ++i) {
+    auto info = mm->output_tensor_meta(i);
+    if (info.error() == Error::Ok) {
+      TensorMeta tm;
+      tm.scalar_type = static_cast<int8_t>(info->scalar_type());
+      auto sizes = info->sizes();
+      tm.shape.assign(sizes.begin(), sizes.end());
+      out.outputs.push_back(std::move(tm));
+    } else {
+      out.outputs.push_back(TensorMeta{{}, -1});
+    }
+  }
+  return out;
+}
+
 ForwardResult Runtime::run_method(const std::string& name,
                                    const std::vector<InputDesc>& inputs) {
   std::vector<std::vector<executorch::aten::SizesType>> shapes(inputs.size());
@@ -132,6 +174,44 @@ ForwardResult Runtime::run_method(const std::string& name,
     }
   }  // lock released: OutputViews now point into owned storage, never the arena
   return ForwardResult(std::move(fs));
+}
+
+// registered_backends()/backend_available(): executorch::runtime::
+// get_num_registered_backends()/get_backend_name(size_t) (runtime/backend/
+// interface.h), the exact same pair used by upstream's
+// get_registered_backend_names() in extension/pybindings/pybindings.cpp.
+// Verified against both the installed 1.3.1 header and that upstream call
+// site.
+std::vector<std::string> registered_backends() {
+  std::vector<std::string> names;
+  size_t n = executorch::runtime::get_num_registered_backends();
+  names.reserve(n);
+  for (size_t i = 0; i < n; ++i) {
+    auto r = executorch::runtime::get_backend_name(i);
+    if (r.ok()) names.emplace_back(*r);
+  }
+  return names;
+}
+
+bool backend_available(const std::string& name) {
+  for (auto& n : registered_backends())
+    if (n == name) return true;
+  return false;
+}
+
+// operator_names(): executorch::runtime::get_registered_kernels()
+// (runtime/kernel/operator_registry.h) returns Span<const Kernel>; each
+// Kernel's name field is `name_` (not `.name` as the task brief's
+// unverified snippet guessed -- confirmed against the installed header and
+// against upstream's get_operator_names() in pybindings.cpp, which reads
+// k.name_ and skips entries where it is nullptr).
+std::vector<std::string> operator_names() {
+  std::vector<std::string> out;
+  auto kernels = executorch::runtime::get_registered_kernels();
+  for (const auto& k : kernels) {
+    if (k.name_ != nullptr) out.emplace_back(k.name_);
+  }
+  return out;
 }
 
 }  // namespace etnp

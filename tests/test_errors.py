@@ -1,6 +1,5 @@
 import numpy as np
 import pytest
-import executorch_numpy_runtime as en
 from executorch_numpy_runtime import _core
 from executorch_numpy_runtime.errors import (
     ExecuTorchError, ProgramLoadError, BackendNotAvailable, ExecutionError)

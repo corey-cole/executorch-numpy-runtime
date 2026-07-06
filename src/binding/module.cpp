@@ -140,6 +140,25 @@ NB_MODULE(_core, m) {
         nb::list out;
         for (const auto& v : fr.outputs()) out.append(copy_out(v));
         return out;  // held[] (keepalives) drop here, after outputs copied
+      })
+      .def("method_meta", [](Runtime& self, const std::string& n) {
+        auto m = self.method_meta(n);
+        auto to_list = [](const std::vector<etnp::TensorMeta>& v) {
+          nb::list l;
+          for (auto& t : v) {
+            nb::dict d;
+            d["scalar_type"] = t.scalar_type;
+            d["shape"] = nb::cast(t.shape);
+            l.append(d);
+          }
+          return l;
+        };
+        nb::dict d;
+        d["num_inputs"] = m.inputs.size();
+        d["num_outputs"] = m.outputs.size();
+        d["inputs"] = to_list(m.inputs);
+        d["outputs"] = to_list(m.outputs);
+        return d;
       });
 
   m.def("load_path", [](const std::string& p) { return Runtime::load_path(p); });
@@ -160,4 +179,8 @@ NB_MODULE(_core, m) {
     return std::make_tuple(was, h.desc.scalar_type,
                             nb::tuple(nb::cast(s)));
   });
+
+  m.def("registered_backends", &etnp::registered_backends);
+  m.def("backend_available", &etnp::backend_available);
+  m.def("operator_names", &etnp::operator_names);
 }
