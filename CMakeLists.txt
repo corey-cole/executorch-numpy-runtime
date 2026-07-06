@@ -33,6 +33,7 @@ find_package(nanobind CONFIG REQUIRED)
 # entirely, which would make the guard blind rather than meaningful.
 nanobind_add_module(_core STABLE_ABI NB_STATIC NOSTRIP
   src/binding/module.cpp
+  src/binding/dtype_map.cpp
   src/et_core/et_core.cpp)
 
 # et_core sources join later tasks; keep the list here.
