@@ -275,3 +275,12 @@ pyrightconfig.json
 
 # End of https://www.toptal.com/developers/gitignore/api/python,visualstudiocode,linux,macos,c++
 
+### Project-specific ###
+# Unpacked prebuilt ExecuTorch runtime tarball (large binary, fetched not vendored)
+/third_party/
+
+# CMake build directories
+/build/
+CMakeCache.txt
+CMakeFiles/
+
