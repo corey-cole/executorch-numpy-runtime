@@ -30,6 +30,18 @@ class TwoMethods(torch.nn.Module):
     def double(self, a): return a * 2
 
 
+class Scale(torch.nn.Module):
+    def forward(self, x): return x * 2.0
+
+
+class Lin(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.l = torch.nn.Linear(8, 8)
+
+    def forward(self, x): return self.l(x)
+
+
 def main(out):
     out = Path(out); out.mkdir(parents=True, exist_ok=True)
     xnn = [XnnpackPartitioner()]
@@ -43,6 +55,37 @@ def main(out):
     lowered = to_edge_transform_and_lower(methods).to_executorch()
     (out / "multi.pte").write_bytes(lowered.buffer)
     print("wrote multi.pte")
+
+    # Dynamic (bounded) shape model.
+    from torch.export import Dim
+    d = Dim("n", min=1, max=8)
+    ep = export(Scale().eval(), (torch.ones(4),), dynamic_shapes={"x": {0: d}})
+    (out / "dynamic.pte").write_bytes(
+        to_edge_transform_and_lower(ep, partitioner=xnn).to_executorch().buffer)
+    print("wrote dynamic.pte")
+
+    # Quantized model (proves optimized/quantized kernels linked).
+    # Uses XNNPACK's PT2E quantization flow. On ExecuTorch 1.3.1 (torch 2.12),
+    # prepare_pt2e/convert_pt2e live under torchao.quantization.pt2e (moved out
+    # of torch.ao.quantization), and there is no separate export_for_training
+    # step -- plain torch.export.export already produces a trainable graph.
+    try:
+        from executorch.backends.xnnpack.quantizer.xnnpack_quantizer import (
+            XNNPACKQuantizer, get_symmetric_quantization_config)
+        from torchao.quantization.pt2e.quantize_pt2e import (
+            prepare_pt2e, convert_pt2e)
+        ex = (torch.randn(2, 8),)
+        m = torch.export.export(Lin().eval(), ex).module()
+        q = XNNPACKQuantizer().set_global(get_symmetric_quantization_config())
+        m = prepare_pt2e(m, q)
+        m(*ex)  # calibrate
+        m = convert_pt2e(m)
+        ep = export(m, ex)
+        (out / "quantized.pte").write_bytes(
+            to_edge_transform_and_lower(ep, partitioner=xnn).to_executorch().buffer)
+        print("wrote quantized.pte")
+    except Exception as e:
+        print("skip quantized.pte:", e)
 
 
 if __name__ == "__main__":

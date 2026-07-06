@@ -30,3 +30,14 @@ def test_unmapped_scalar_type_raises():
 def test_unmapped_numpy_raises():
     with pytest.raises(Exception):
         _core._np_to_st("c", 16)  # complex128 unsupported
+
+
+import numpy as np
+import executorch_numpy_runtime as en
+from tests.conftest import model_or_skip
+
+def test_float32_roundtrip_fidelity():
+    m = en.Runtime.get().load_program(model_or_skip("add.pte")).load_method("forward")
+    x = np.random.randn(3).astype(np.float32)
+    out = m([x, np.zeros(3, np.float32)])[0]  # x + 0 == x
+    np.testing.assert_array_equal(out, x)     # bit-exact round trip
