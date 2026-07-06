@@ -1,5 +1,4 @@
 import numpy as np
-import pytest
 import executorch_numpy_runtime as en
 from tests.conftest import model_or_skip
 
@@ -33,6 +32,10 @@ def test_quantized_model_runs():
     m = _method("quantized.pte")
     out = m([np.random.randn(2, 8).astype(np.float32)])
     assert out[0].shape == (2, 8)
+    # Coarse sanity check (no torch reference available): outputs should be
+    # finite and not a degenerate all-zero/all-identical buffer.
+    assert np.isfinite(out[0]).all()
+    assert not np.all(out[0] == out[0].flat[0])
 
 
 def test_mixed_dtype_model():

@@ -45,6 +45,8 @@ A single `Runtime` instance is thread-safe to share across threads, but method c
 - `OperatorNotFound`: An operator required by the `.pte` is not in the linked kernel set.
 - `ExecutionError`: Runtime failure during execution (e.g. shape/dtype mismatch).
 
+Honesty note: `OperatorNotFound` and `BackendNotAvailable` are best-effort under ExecuTorch 1.3.1. That version's `Module::load()`/`execute()` don't always expose which operator or delegate was missing, so some missing-operator/missing-backend cases surface as the more generic `ProgramLoadError` or `ExecutionError` instead of the specific subclass.
+
 ## Introspection
 
 ```python

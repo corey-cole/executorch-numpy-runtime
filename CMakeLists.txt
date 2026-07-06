@@ -36,7 +36,6 @@ nanobind_add_module(_core STABLE_ABI NB_STATIC NOSTRIP
   src/binding/dtype_map.cpp
   src/et_core/et_core.cpp)
 
-# et_core sources join later tasks; keep the list here.
 target_include_directories(_core PRIVATE src)
 
 # Link the whole ExecuTorch stack. The runtime config self-whole-archives the kernel/backend

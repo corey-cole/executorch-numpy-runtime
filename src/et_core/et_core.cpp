@@ -87,6 +87,11 @@ Runtime::Runtime(std::unique_ptr<RuntimeState> s) : state_(std::move(s)) {}
 Runtime::~Runtime() = default;
 
 std::vector<std::string> Runtime::method_names() const {
+  // Module::method_names() lazily loads/mutates the Module's internal
+  // methods_ map, which is not internally synchronized; take the same lock
+  // run_method() uses so this can't race a concurrent execute() on this
+  // Runtime. Never calls run_method(), so no self-deadlock risk.
+  std::lock_guard<std::mutex> guard(state_->exec_mutex);
   auto res = state_->module->method_names();
   if (res.error() != Error::Ok)
     throw EtException({ErrorKind::Load, "method_names() failed", ""});
@@ -101,6 +106,9 @@ std::vector<std::string> Runtime::method_names() const {
 // have no TensorInfo, so input_tensor_meta()/output_tensor_meta() returns an
 // error for them; those slots get TensorMeta{{}, -1} placeholders.
 MethodMeta Runtime::method_meta(const std::string& name) const {
+  // Same rationale as method_names(): Module::method_meta() lazily loads and
+  // mutates internal state, so lock exec_mutex to avoid racing execute().
+  std::lock_guard<std::mutex> guard(state_->exec_mutex);
   auto mm = state_->module->method_meta(name);
   if (mm.error() != Error::Ok)
     throw EtException({ErrorKind::Load, "method_meta('" + name + "') failed", ""});
@@ -163,6 +171,21 @@ ForwardResult Runtime::run_method(const std::string& name,
     fs->storage.reserve(result->size());
     fs->views.reserve(result->size());
     for (auto& ev : *result) {
+      // Defensive: EValue::toTensor() is ET_CHECK_MSG(isTensor(), ...) --
+      // an uncatchable et_pal_abort() on a non-tensor EValue, which would
+      // crash the whole interpreter instead of raising a Python exception.
+      // We could not produce a real non-tensor-output .pte to exercise this
+      // via a fixture: torch.export + to_edge_transform_and_lower asserts
+      // internally ("graph_output_allocated not set") on graphs whose output
+      // is a bare int/scalar (tried returning `a.shape[0]` and
+      // `a.sum().item()` under the ExecuTorch 1.3.1 export pipeline), so
+      // ordinary export tooling appears unable to emit such a program. The
+      // guard is kept anyway as correct, cheap defense against any .pte
+      // (however produced) whose method genuinely returns a non-tensor.
+      if (!ev.isTensor()) {
+        throw EtException({ErrorKind::Execution,
+            "method '" + name + "' returned a non-tensor output (unsupported)", ""});
+      }
       const auto& t = ev.toTensor();
       std::vector<uint8_t> buf(t.nbytes());
       std::memcpy(buf.data(), t.const_data_ptr(), t.nbytes());  // copy OUT of arena
