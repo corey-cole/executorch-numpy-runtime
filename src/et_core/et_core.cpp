@@ -1,5 +1,8 @@
 #include "et_core/et_core.h"
 
+#include <cstring>
+#include <mutex>
+
 #include <executorch/extension/data_loader/buffer_data_loader.h>
 #include <executorch/extension/module/module.h>
 #include <executorch/extension/tensor/tensor.h>
@@ -15,8 +18,10 @@ using executorch::runtime::Error;
 using executorch::aten::ScalarType;
 
 struct ForwardState {
-  std::vector<EValue> outputs;  // owns result EValues (arena-backing lifetime)
-  std::vector<OutputView> views;
+  // OWNED output buffers: bytes are copied out of the Module's memory-planned
+  // arena (under the exec lock) so OutputViews never alias live arena memory.
+  std::vector<std::vector<uint8_t>> storage;  // one owned buffer per output
+  std::vector<OutputView> views;              // each .data -> storage[i].data()
 };
 
 ForwardResult::ForwardResult(std::unique_ptr<ForwardState> s) : state_(std::move(s)) {}
@@ -28,6 +33,7 @@ const std::vector<OutputView>& ForwardResult::outputs() const { return state_->v
 struct RuntimeState {
   std::string owned_bytes;                 // non-empty for buffer loads; keeps data alive
   std::unique_ptr<Module> module;
+  std::mutex exec_mutex;                    // serializes execute + copy-out per Runtime
 };
 
 static EtException load_error(const std::string& what) {
@@ -84,19 +90,33 @@ ForwardResult Runtime::run_method(const std::string& name,
                                  static_cast<ScalarType>(inputs[i].scalar_type)));
     evalues.emplace_back(tensors[i]);
   }
-  auto result = state_->module->execute(name, evalues);
-  if (result.error() != Error::Ok) {
-    throw EtException({ErrorKind::Execution,
-        "execute('" + name + "') failed", ""});  // refined in Task 7
-  }
+  // A single ExecuTorch Module is NOT thread-safe: execute() writes into
+  // memory-planned arena buffers that are reused across calls, and the output
+  // tensors alias that arena. The lock must therefore cover BOTH execute() and
+  // the copy-out of the arena bytes, so a second thread cannot clobber the
+  // arena before we have copied this call's outputs into owned storage.
   auto fs = std::make_unique<ForwardState>();
-  fs->outputs = std::move(*result);
-  for (auto& ev : fs->outputs) {
-    const auto& t = ev.toTensor();
-    std::vector<int64_t> shp(t.sizes().begin(), t.sizes().end());
-    fs->views.push_back(OutputView{std::move(shp),
-        static_cast<int8_t>(t.scalar_type()), t.const_data_ptr(), t.nbytes()});
-  }
+  {
+    std::lock_guard<std::mutex> guard(state_->exec_mutex);
+    auto result = state_->module->execute(name, evalues);
+    if (result.error() != Error::Ok) {
+      throw EtException({ErrorKind::Execution,
+          "execute('" + name + "') failed", ""});  // refined in Task 7
+    }
+    // reserve() so storage.back().data() pointers stay stable across pushes.
+    fs->storage.reserve(result->size());
+    fs->views.reserve(result->size());
+    for (auto& ev : *result) {
+      const auto& t = ev.toTensor();
+      std::vector<uint8_t> buf(t.nbytes());
+      std::memcpy(buf.data(), t.const_data_ptr(), t.nbytes());  // copy OUT of arena
+      std::vector<int64_t> shp(t.sizes().begin(), t.sizes().end());
+      fs->storage.push_back(std::move(buf));
+      fs->views.push_back(OutputView{std::move(shp),
+          static_cast<int8_t>(t.scalar_type()),
+          fs->storage.back().data(), fs->storage.back().size()});
+    }
+  }  // lock released: OutputViews now point into owned storage, never the arena
   return ForwardResult(std::move(fs));
 }
 

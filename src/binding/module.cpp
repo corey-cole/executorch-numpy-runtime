@@ -90,7 +90,10 @@ NB_MODULE(_core, m) {
         held.reserve(arrs.size());
         for (auto a : arrs) { held.push_back(make_held_input(a)); }
         for (auto& h : held) descs.push_back(h.desc);
-        etnp::ForwardResult fr = self.run_method(name, descs);  // GIL added in Task 6
+        etnp::ForwardResult fr = [&] {
+          nb::gil_scoped_release nogil;   // release AFTER inputs built; touch no py objects
+          return self.run_method(name, descs);
+        }();
         nb::list out;
         for (const auto& v : fr.outputs()) out.append(copy_out(v));
         return out;  // held[] (keepalives) drop here, after outputs copied

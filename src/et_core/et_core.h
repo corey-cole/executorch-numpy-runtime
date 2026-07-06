@@ -30,7 +30,8 @@ struct InputDesc {
   int8_t scalar_type;  // ExecuTorch ScalarType code
 };
 
-// Borrowed output: points into ExecuTorch's arena, valid until next forward()/destroy.
+// Output view: points into ForwardResult-owned storage (bytes copied out of
+// ExecuTorch's arena under the exec lock). Valid for the ForwardResult's life.
 struct OutputView {
   std::vector<int64_t> shape;
   int8_t scalar_type;
@@ -49,9 +50,9 @@ struct MethodMeta {
 };
 
 struct RuntimeState;   // pimpl (owns Module + optional buffer)
-struct ForwardState;   // pimpl (owns output EValues)
+struct ForwardState;   // pimpl (owns copied-out output buffers)
 
-// RAII owner of output EValues; dropping it ends OutputView lifetime.
+// RAII owner of output buffers; dropping it ends OutputView lifetime.
 class ForwardResult {
  public:
   explicit ForwardResult(std::unique_ptr<ForwardState> s);
