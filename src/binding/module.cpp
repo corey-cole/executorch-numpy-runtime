@@ -79,8 +79,51 @@ static nb::object copy_out(const etnp::OutputView& v) {
   return nb::cast(view);
 }
 
+// Payload for the exception translator below: Python classes looked up once
+// at module-init time and kept alive for the process lifetime (leaked
+// intentionally -- same lifetime as the module itself).
+struct ErrorClasses {
+  nb::object base, load, backend, opnf, exec;
+};
+
 NB_MODULE(_core, m) {
   m.attr("__et_version__") = ETNP_ET_VERSION;
+
+  // Map etnp::EtException -> the matching executorch_numpy_runtime.errors
+  // subclass. Confirmed against the installed nanobind 2.13.0
+  // (nanobind/nb_error.h): nb::register_exception_translator(exception_translator,
+  // void* payload) takes a free function pointer (no captures) plus an
+  // opaque payload pointer, matching the brief's mechanism exactly -- no
+  // fallback to a try/catch-per-lambda wrapper was needed.
+  nb::module_ errmod = nb::module_::import_("executorch_numpy_runtime.errors");
+  auto* classes = new ErrorClasses{
+      /*base*/    errmod.attr("ExecuTorchError"),
+      /*load*/    errmod.attr("ProgramLoadError"),
+      /*backend*/ errmod.attr("BackendNotAvailable"),
+      /*opnf*/    errmod.attr("OperatorNotFound"),
+      /*exec*/    errmod.attr("ExecutionError"),
+  };
+  nb::register_exception_translator(
+      [](const std::exception_ptr& p, void* payload) {
+        auto* c = static_cast<ErrorClasses*>(payload);
+        try {
+          std::rethrow_exception(p);
+        } catch (const etnp::EtException& e) {
+          nb::object cls;
+          switch (e.error.kind) {
+            case etnp::ErrorKind::Load:            cls = c->load; break;
+            case etnp::ErrorKind::BackendMissing:  cls = c->backend; break;
+            case etnp::ErrorKind::OperatorMissing: cls = c->opnf; break;
+            case etnp::ErrorKind::Execution:       cls = c->exec; break;
+            case etnp::ErrorKind::DtypeUnmapped:   cls = c->base; break;
+            default:                               cls = c->base; break;
+          }
+          std::string msg = e.error.message;
+          if (!e.error.detail.empty()) msg += " [" + e.error.detail + "]";
+          PyErr_SetString(cls.ptr(), msg.c_str());
+        }
+      },
+      classes);
 
   nb::class_<Runtime>(m, "_Runtime")
       .def("method_names", &Runtime::method_names)

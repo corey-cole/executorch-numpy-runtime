@@ -36,14 +36,28 @@ struct RuntimeState {
   std::mutex exec_mutex;                    // serializes execute + copy-out per Runtime
 };
 
-static EtException load_error(const std::string& what) {
-  return EtException({ErrorKind::Load, "Failed to load .pte: " + what, ""});
+// Classify a Module::load() failure. In ExecuTorch 1.3.1, Module::load()
+// surfaces a single runtime::Error and does not expose which delegate (if
+// any) was being resolved, so we cannot yet distinguish "corrupt/malformed/
+// version-incompatible file" from "valid file lowered for a backend this
+// runtime does not link" (e.g. CoreML/QNN/XNNPACK when only the CPU
+// portable kernels are linked in). Robust discrimination needs the failing
+// delegate id, which is only obtainable via registered_backends()
+// cross-checking (Task 8) or richer error plumbing from ExecuTorch itself.
+// Until then every load failure is classified as ErrorKind::Load and
+// surfaces as ProgramLoadError; a non-CPU .pte will therefore also raise
+// ProgramLoadError rather than BackendNotAvailable. This is documented as
+// an accepted coarse behavior (see task-7 brief).
+static EtException classify_load_failure(const std::string& what) {
+  return EtException({ErrorKind::Load,
+      "Failed to load .pte (corrupt, or exported by an ExecuTorch version "
+      "other than the one this runtime targets, 1.3.1): " + what, ""});
 }
 
 std::unique_ptr<Runtime> Runtime::load_path(const std::string& path) {
   auto st = std::make_unique<RuntimeState>();
   st->module = std::make_unique<Module>(path);
-  if (st->module->load() != Error::Ok) throw load_error(path);
+  if (st->module->load() != Error::Ok) throw classify_load_failure(path);
   return std::make_unique<Runtime>(std::move(st));
 }
 
@@ -63,7 +77,7 @@ std::unique_ptr<Runtime> Runtime::load_buffer(std::string bytes) {
   auto loader = std::make_unique<BufferDataLoader>(
       st->owned_bytes.data(), st->owned_bytes.size());
   st->module = std::make_unique<Module>(std::move(loader));
-  if (st->module->load() != Error::Ok) throw load_error("<buffer>");
+  if (st->module->load() != Error::Ok) throw classify_load_failure("<buffer>");
   return std::make_unique<Runtime>(std::move(st));
 }
 
