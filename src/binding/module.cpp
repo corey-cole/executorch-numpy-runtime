@@ -52,11 +52,49 @@ static HeldInput make_held_input(nb::handle obj, bool* was_contig = nullptr) {
   return h;
 }
 
+// Allocate a fresh, owning numpy array copied from arena memory (never a view).
+//
+// We deliberately do NOT pass an `owner`/base object here. nanobind's numpy
+// export path (nb_ndarray.cpp: ndarray_export()) only returns a zero-copy view
+// when the ndarray_handle has a non-null owner or `self`; with both null it
+// calls `numpy.copy()` on a transient view of `v.data`, which makes numpy
+// allocate and OWN a fresh buffer and memcpy the bytes in -- exactly the
+// mandatory-copy, `OWNDATA=True` semantics this binding must guarantee.
+// (Verified by reading the installed nanobind 2.13.0 source, not assumed.)
+static nb::object copy_out(const etnp::OutputView& v) {
+  etnp::NpDtype d = etnp::scalar_type_to_numpy(v.scalar_type);
+  size_t ndim = v.shape.size();
+  std::vector<size_t> shape(v.shape.begin(), v.shape.end());
+  nb::dlpack::dtype dt{
+      /*code*/ (uint8_t)(d.kind == 'f' ? nb::dlpack::dtype_code::Float :
+                         d.kind == 'i' ? nb::dlpack::dtype_code::Int :
+                         d.kind == 'u' ? nb::dlpack::dtype_code::UInt :
+                                         nb::dlpack::dtype_code::Bool),
+      /*bits*/ (uint8_t)(d.itemsize * 8), /*lanes*/ 1};
+  // Non-owning transient view into arena memory; nb::cast's default
+  // rv_policy (automatic_reference) copies it into a new numpy array because
+  // no owner/self is attached to the handle below.
+  nb::ndarray<nb::numpy> view(const_cast<void*>(v.data), ndim, shape.data(),
+                               /*owner=*/nb::handle(), /*strides=*/nullptr, dt);
+  return nb::cast(view);
+}
+
 NB_MODULE(_core, m) {
   m.attr("__et_version__") = ETNP_ET_VERSION;
 
   nb::class_<Runtime>(m, "_Runtime")
-      .def("method_names", &Runtime::method_names);
+      .def("method_names", &Runtime::method_names)
+      .def("run_method", [](Runtime& self, const std::string& name, nb::list arrs) {
+        std::vector<HeldInput> held;
+        std::vector<etnp::InputDesc> descs;
+        held.reserve(arrs.size());
+        for (auto a : arrs) { held.push_back(make_held_input(a)); }
+        for (auto& h : held) descs.push_back(h.desc);
+        etnp::ForwardResult fr = self.run_method(name, descs);  // GIL added in Task 6
+        nb::list out;
+        for (const auto& v : fr.outputs()) out.append(copy_out(v));
+        return out;  // held[] (keepalives) drop here, after outputs copied
+      });
 
   m.def("load_path", [](const std::string& p) { return Runtime::load_path(p); });
   m.def("load_buffer", [](nb::bytes b) {

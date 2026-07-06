@@ -43,7 +43,7 @@ target_include_directories(_core PRIVATE src)
 # archives via INTERFACE_LINK_OPTIONS, so linking these targets is enough.
 target_link_libraries(_core PRIVATE
   executorch optimized_native_cpu_ops_lib xnnpack_backend quantized_ops_lib
-  extension_module_static extension_data_loader)
+  extension_module_static extension_data_loader extension_tensor)
 
 target_compile_definitions(_core PRIVATE ETNP_ET_VERSION="${ETNP_ET_VERSION}")
 
