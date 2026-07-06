@@ -32,7 +32,8 @@ find_package(nanobind CONFIG REQUIRED)
 # XNNPACK static-init TU); nanobind's default Release build strips the symbol table
 # entirely, which would make the guard blind rather than meaningful.
 nanobind_add_module(_core STABLE_ABI NB_STATIC NOSTRIP
-  src/binding/module.cpp)
+  src/binding/module.cpp
+  src/et_core/et_core.cpp)
 
 # et_core sources join later tasks; keep the list here.
 target_include_directories(_core PRIVATE src)
@@ -40,7 +41,8 @@ target_include_directories(_core PRIVATE src)
 # Link the whole ExecuTorch stack. The runtime config self-whole-archives the kernel/backend
 # archives via INTERFACE_LINK_OPTIONS, so linking these targets is enough.
 target_link_libraries(_core PRIVATE
-  executorch optimized_native_cpu_ops_lib xnnpack_backend quantized_ops_lib)
+  executorch optimized_native_cpu_ops_lib xnnpack_backend quantized_ops_lib
+  extension_module_static extension_data_loader)
 
 target_compile_definitions(_core PRIVATE ETNP_ET_VERSION="${ETNP_ET_VERSION}")
 
