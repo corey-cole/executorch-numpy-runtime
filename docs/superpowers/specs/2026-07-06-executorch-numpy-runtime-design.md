@@ -78,7 +78,7 @@ Three layers, each independently testable. The memory-critical logic is quaranti
 **binding-agnostic** C++ core (`et_core`) that knows nothing about numpy or Python.
 
 ```
-┌─ Python: executorch_numpy/ ────────────────────────────────┐
+┌─ Python: executorch_numpy_runtime/ ────────────────────────┐
 │  Runtime → Program → Method   (numpy-valued, mirrors        │
 │  runtime_info(), __version__   executorch.runtime)          │
 ├─ nanobind glue: _core.<abi3>.so ───────────────────────────┤

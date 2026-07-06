@@ -4,7 +4,7 @@
 
 **Goal:** Ship a Python package that loads and runs arbitrary CPU-targeted ExecuTorch `.pte` files with numpy as the only required dependency — no torch.
 
-**Architecture:** A binding-agnostic torch-free C++ core (`et_core`, grown from the proven JNI `et_runtime`) owns all ExecuTorch `Module`/`EValue` lifetime and the arena→copy-out memory model. A thin nanobind layer (`_core`) marshals numpy ↔ `EValue`. A pure-Python package (`executorch_numpy`) exposes `Runtime`/`Program`/`Method`. Static ExecuTorch libs come from the prebuilt, SHA-pinned `executorch-runtime-dist` v1.3.1 tarball, whole-archived by its own CMake config.
+**Architecture:** A binding-agnostic torch-free C++ core (`et_core`, grown from the proven JNI `et_runtime`) owns all ExecuTorch `Module`/`EValue` lifetime and the arena→copy-out memory model. A thin nanobind layer (`_core`) marshals numpy ↔ `EValue`. A pure-Python package (`executorch_numpy_runtime`) exposes `Runtime`/`Program`/`Method`. Static ExecuTorch libs come from the prebuilt, SHA-pinned `executorch-runtime-dist` v1.3.1 tarball, whole-archived by its own CMake config.
 
 **Tech Stack:** C++17, nanobind (STABLE_ABI), scikit-build-core, CMake, numpy, pytest, ASan/LSan. Prebuilt ExecuTorch 1.3.1 static libs.
 
@@ -19,7 +19,7 @@
 - **`et_core` is binding-agnostic**: it speaks host pointers + shape + `ScalarType`, and must never include Python/numpy/nanobind headers.
 - **dtype map (ScalarType → numpy):** Float→float32, Double→float64, Long→int64, Int→int32, Short→int16, Byte→uint8, Char→int8, Bool→bool_, Half→float16, BFloat16→uint16 (raw bits).
 - **Exclusions (documented, not supported):** non-CPU delegates (CoreML/QNN/Vulkan/Metal), custom ops, torchao low-bit kernels, bundled programs, ETDump/profiling, custom data loaders.
-- **Package name:** distribution `executorch-numpy`, import `executorch_numpy`, extension module `executorch_numpy._core`.
+- **Package name:** distribution `executorch-numpy-runtime`, import `executorch_numpy_runtime`, extension module `executorch_numpy_runtime._core`.
 
 **Reference sources (read, don't blindly copy):**
 - JNI core (reuse foundation): `/home/corey/workspace/djl-executorch-engine/native/core/et_runtime.{h,cpp}`
@@ -48,7 +48,7 @@ executorch-numpy-runtime/
 │       ├── dtype_map.h                # ScalarType <-> numpy dtype-code table (no numpy headers)
 │       ├── dtype_map.cpp
 │       └── module.cpp                 # nanobind: numpy marshalling, GIL, error mapping, NB_MODULE
-├── executorch_numpy/
+├── executorch_numpy_runtime/
 │   ├── __init__.py                    # public API surface + __version__
 │   ├── _api.py                        # Runtime / Program / Method wrappers
 │   ├── errors.py                      # exception hierarchy (Python side)
@@ -77,12 +77,12 @@ executorch-numpy-runtime/
 
 **Files:**
 - Create: `pyproject.toml`, `CMakeLists.txt`, `cmake/RuntimePin.cmake`, `cmake/assert_kernels_registered.cmake`
-- Create: `src/binding/module.cpp` (placeholder module), `executorch_numpy/__init__.py`
+- Create: `src/binding/module.cpp` (placeholder module), `executorch_numpy_runtime/__init__.py`
 - Create: `tests/conftest.py`, `tests/test_smoke.py`
 - Create: `.gitignore` additions for build dirs
 
 **Interfaces:**
-- Produces: an importable extension `executorch_numpy._core` exposing `_core.__et_version__ == "1.3.1"`; a CMake build that fails if XNNPACK/quantized/optimized kernel registration TUs are GC'd.
+- Produces: an importable extension `executorch_numpy_runtime._core` exposing `_core.__et_version__ == "1.3.1"`; a CMake build that fails if XNNPACK/quantized/optimized kernel registration TUs are GC'd.
 
 - [ ] **Step 1: Unpack the pinned runtime tarball into a local prefix**
 
@@ -143,7 +143,7 @@ message(STATUS "assert_kernels_registered: XNNPACK registration TU present in ${
 
 ```cmake
 cmake_minimum_required(VERSION 3.24)
-project(executorch_numpy LANGUAGES CXX)
+project(executorch_numpy_runtime LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -177,7 +177,7 @@ add_custom_command(TARGET _core POST_BUILD
           -P ${CMAKE_SOURCE_DIR}/cmake/assert_kernels_registered.cmake
   VERBATIM)
 
-install(TARGETS _core LIBRARY DESTINATION executorch_numpy)
+install(TARGETS _core LIBRARY DESTINATION executorch_numpy_runtime)
 ```
 
 - [ ] **Step 5: Write placeholder `src/binding/module.cpp`**
@@ -199,7 +199,7 @@ requires = ["scikit-build-core>=0.10", "nanobind>=2.0"]
 build-backend = "scikit_build_core.build"
 
 [project]
-name = "executorch-numpy"
+name = "executorch-numpy-runtime"
 version = "0.0.1"
 description = "Torch-free numpy runtime for ExecuTorch .pte files (ExecuTorch 1.3.1, CPU)"
 requires-python = ">=3.12"
@@ -218,7 +218,7 @@ build-dir = "build/{wheel_tag}"
 CMAKE_BUILD_TYPE = "Release"
 ```
 
-- [ ] **Step 7: Write `executorch_numpy/__init__.py`**
+- [ ] **Step 7: Write `executorch_numpy_runtime/__init__.py`**
 
 ```python
 from ._core import __et_version__
@@ -244,10 +244,10 @@ def model_or_skip(name: str) -> str:
 - [ ] **Step 9: Write `tests/test_smoke.py`**
 
 ```python
-import executorch_numpy
+import executorch_numpy_runtime
 
 def test_import_and_version():
-    assert executorch_numpy.__et_version__ == "1.3.1"
+    assert executorch_numpy_runtime.__et_version__ == "1.3.1"
 ```
 
 - [ ] **Step 10: Build and run the smoke test**
@@ -262,7 +262,7 @@ Expected: build succeeds, the `assert_kernels_registered` POST_BUILD prints "XNN
 - [ ] **Step 11: Commit**
 
 ```bash
-git add pyproject.toml CMakeLists.txt cmake/ src/binding/module.cpp executorch_numpy/ tests/ .gitignore
+git add pyproject.toml CMakeLists.txt cmake/ src/binding/module.cpp executorch_numpy_runtime/ tests/ .gitignore
 git commit -m "feat: scaffold build with pinned ET 1.3.1 runtime and whole-archive guard"
 ```
 
@@ -284,7 +284,7 @@ git commit -m "feat: scaffold build with pinned ET 1.3.1 runtime and whole-archi
     `static std::unique_ptr<Runtime> load_path(const std::string& path);`
     `static std::unique_ptr<Runtime> load_buffer(std::string bytes);` (Runtime owns the buffer copy)
     `std::vector<std::string> method_names() const;`
-- Produces (Python): `executorch_numpy._core.load_path(str) -> _Runtime`, `load_buffer(bytes) -> _Runtime`, `_Runtime.method_names() -> list[str]`.
+- Produces (Python): `executorch_numpy_runtime._core.load_path(str) -> _Runtime`, `load_buffer(bytes) -> _Runtime`, `_Runtime.method_names() -> list[str]`.
 
 - [ ] **Step 1: Write `tools/export_fixtures.py`** (run later in the ET venv)
 
@@ -353,7 +353,7 @@ Expected: `add.pte`, `dtypes.pte`, `multi.pte` exist. (If the multi-method expor
 
 ```python
 import pytest
-from executorch_numpy import _core
+from executorch_numpy_runtime import _core
 from tests.conftest import model_or_skip
 
 def test_load_path_lists_methods():
@@ -588,7 +588,7 @@ git commit -m "feat: et_core Module load (path+buffer) and method enumeration"
 
 ```python
 import pytest
-from executorch_numpy import _core
+from executorch_numpy_runtime import _core
 
 # ScalarType codes (ExecuTorch/PyTorch canonical): used only to assert the mapping.
 ST = dict(Byte=0, Char=1, Short=2, Int=3, Long=4, Half=5, Float=6,
@@ -747,7 +747,7 @@ git commit -m "feat: bidirectional dtype table with reject-on-unmapped"
 ```python
 import numpy as np
 import pytest
-from executorch_numpy import _core
+from executorch_numpy_runtime import _core
 
 def test_contiguous_float32_maps():
     a = np.ones((2, 3), dtype=np.float32)
@@ -856,7 +856,7 @@ git commit -m "feat: numpy->ET input marshalling with contiguity handling and ke
 
 ```python
 import numpy as np
-from executorch_numpy import _core
+from executorch_numpy_runtime import _core
 from tests.conftest import model_or_skip
 
 def test_add_forward_correct():
@@ -1006,7 +1006,7 @@ git commit -m "feat: run_method end-to-end with mandatory output copy"
 ```python
 import numpy as np
 from concurrent.futures import ThreadPoolExecutor
-from executorch_numpy import _core
+from executorch_numpy_runtime import _core
 from tests.conftest import model_or_skip
 
 def test_concurrent_forward_correct():
@@ -1057,24 +1057,24 @@ git commit -m "feat: release GIL around execute only, per memory ordering rules"
 ## Task 7: Error hierarchy — map core failures to Python exceptions
 
 **Files:**
-- Create: `executorch_numpy/errors.py`
+- Create: `executorch_numpy_runtime/errors.py`
 - Modify: `src/et_core/et_core.cpp` (classify load errors: backend vs operator vs verification)
 - Modify: `src/binding/module.cpp` (register exception translator mapping `ErrorKind` → Python classes)
-- Modify: `executorch_numpy/__init__.py` (export exceptions)
+- Modify: `executorch_numpy_runtime/__init__.py` (export exceptions)
 - Create: `tests/test_errors.py`
 
 **Interfaces:**
 - Consumes: `EtException`, `ErrorKind`, `etnp::backend_available` (from Task 8 — declare/stub now, or inline the backend check here).
-- Produces (Python): `executorch_numpy.errors.{ExecuTorchError, ProgramLoadError, BackendNotAvailable, OperatorNotFound, ExecutionError}`; `_core` raises the matching subclass.
+- Produces (Python): `executorch_numpy_runtime.errors.{ExecuTorchError, ProgramLoadError, BackendNotAvailable, OperatorNotFound, ExecutionError}`; `_core` raises the matching subclass.
 
 - [ ] **Step 1: Write the failing test `tests/test_errors.py`**
 
 ```python
 import numpy as np
 import pytest
-import executorch_numpy as en
-from executorch_numpy import _core
-from executorch_numpy.errors import (
+import executorch_numpy_runtime as en
+from executorch_numpy_runtime import _core
+from executorch_numpy_runtime.errors import (
     ExecuTorchError, ProgramLoadError, BackendNotAvailable, ExecutionError)
 from tests.conftest import model_or_skip, MODELS
 
@@ -1102,13 +1102,13 @@ def test_non_cpu_backend_raises_backend_not_available():
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `pytest tests/test_errors.py -v`
-Expected: FAIL — `executorch_numpy.errors` missing.
+Expected: FAIL — `executorch_numpy_runtime.errors` missing.
 
-- [ ] **Step 3: Write `executorch_numpy/errors.py`**
+- [ ] **Step 3: Write `executorch_numpy_runtime/errors.py`**
 
 ```python
 class ExecuTorchError(Exception):
-    """Base class for all executorch_numpy runtime errors."""
+    """Base class for all executorch_numpy_runtime runtime errors."""
 
 class ProgramLoadError(ExecuTorchError):
     """Malformed, corrupt, or version-incompatible .pte."""
@@ -1145,7 +1145,7 @@ Note: robust backend-vs-corruption discrimination depends on ExecuTorch surfacin
 ```cpp
 #include <nanobind/nanobind.h>
 // Inside NB_MODULE, after importing the Python errors module:
-  nb::module_ errmod = nb::module_::import_("executorch_numpy.errors");
+  nb::module_ errmod = nb::module_::import_("executorch_numpy_runtime.errors");
   nb::object base   = errmod.attr("ExecuTorchError");
   nb::object load   = errmod.attr("ProgramLoadError");
   nb::object backend= errmod.attr("BackendNotAvailable");
@@ -1173,7 +1173,7 @@ Note: robust backend-vs-corruption discrimination depends on ExecuTorch surfacin
 ```
 Note: verify nanobind's `register_exception_translator` signature/payload mechanism against the installed version; the simplest robust alternative is a `try/catch` wrapper inside each bound lambda that calls a shared `raise_py(const EtException&)` helper. Prefer whichever the installed nanobind supports cleanly.
 
-- [ ] **Step 6: Export exceptions from `executorch_numpy/__init__.py`**
+- [ ] **Step 6: Export exceptions from `executorch_numpy_runtime/__init__.py`**
 
 ```python
 from ._core import __et_version__, load_path, load_buffer
@@ -1198,7 +1198,7 @@ Expected: non-skipped tests PASS (corrupt→`ProgramLoadError`, unmapped dtype�
 - [ ] **Step 8: Commit**
 
 ```bash
-git add executorch_numpy/errors.py executorch_numpy/__init__.py src/et_core/et_core.cpp src/binding/module.cpp tests/test_errors.py
+git add executorch_numpy_runtime/errors.py executorch_numpy_runtime/__init__.py src/et_core/et_core.cpp src/binding/module.cpp tests/test_errors.py
 git commit -m "feat: exception hierarchy mapping core failures to Python errors"
 ```
 
@@ -1209,18 +1209,18 @@ git commit -m "feat: exception hierarchy mapping core failures to Python errors"
 **Files:**
 - Modify: `src/et_core/et_core.cpp` (implement `method_meta`, `backend_available`, `registered_backends`, `operator_names`)
 - Modify: `src/binding/module.cpp` (bind them)
-- Create: `executorch_numpy/info.py`
+- Create: `executorch_numpy_runtime/info.py`
 - Create: `tests/test_meta_info.py`
 
 **Interfaces:**
 - Produces (C++): `Runtime::method_meta`, `etnp::backend_available/registered_backends/operator_names` (declared in Task 2 header).
-- Produces (Python): `_core._Runtime.method_meta(name) -> dict`, `_core.registered_backends() -> list[str]`, `_core.operator_names() -> list[str]`, `_core.backend_available(str) -> bool`; and `executorch_numpy.runtime_info() -> dict`.
+- Produces (Python): `_core._Runtime.method_meta(name) -> dict`, `_core.registered_backends() -> list[str]`, `_core.operator_names() -> list[str]`, `_core.backend_available(str) -> bool`; and `executorch_numpy_runtime.runtime_info() -> dict`.
 
 - [ ] **Step 1: Write the failing test `tests/test_meta_info.py`**
 
 ```python
-import executorch_numpy as en
-from executorch_numpy import _core
+import executorch_numpy_runtime as en
+from executorch_numpy_runtime import _core
 from tests.conftest import model_or_skip
 
 def test_method_meta_shapes():
@@ -1328,11 +1328,11 @@ Note: verify the exact 1.3.1 API names (`get_num_registered_backends`/`get_backe
 Run:
 ```bash
 pip install -e . --no-build-isolation
-python -c "from executorch_numpy import _core; print(_core.registered_backends()); print(_core.operator_names()[:10])"
+python -c "from executorch_numpy_runtime import _core; print(_core.registered_backends()); print(_core.operator_names()[:10])"
 ```
 Update the backend-name assertions in `tests/test_meta_info.py` and `tests/test_errors.py` to match the printed names.
 
-- [ ] **Step 6: Write `executorch_numpy/info.py`**
+- [ ] **Step 6: Write `executorch_numpy_runtime/info.py`**
 
 ```python
 from . import _core
@@ -1364,7 +1364,7 @@ Expected: all PASS.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add src/et_core/et_core.cpp src/binding/module.cpp executorch_numpy/info.py executorch_numpy/__init__.py tests/test_meta_info.py tests/test_errors.py
+git add src/et_core/et_core.cpp src/binding/module.cpp executorch_numpy_runtime/info.py executorch_numpy_runtime/__init__.py tests/test_meta_info.py tests/test_errors.py
 git commit -m "feat: method_meta and runtime introspection (backends, ops, runtime_info)"
 ```
 
@@ -1373,8 +1373,8 @@ git commit -m "feat: method_meta and runtime introspection (backends, ops, runti
 ## Task 9: High-level Python API — Runtime / Program / Method
 
 **Files:**
-- Create: `executorch_numpy/_api.py`
-- Modify: `executorch_numpy/__init__.py`
+- Create: `executorch_numpy_runtime/_api.py`
+- Modify: `executorch_numpy_runtime/__init__.py`
 - Create: `tests/test_api.py`
 
 **Interfaces:**
@@ -1389,7 +1389,7 @@ git commit -m "feat: method_meta and runtime introspection (backends, ops, runti
 
 ```python
 import numpy as np
-import executorch_numpy as en
+import executorch_numpy_runtime as en
 from tests.conftest import model_or_skip
 
 def test_high_level_forward():
@@ -1414,7 +1414,7 @@ def test_method_metadata_exposed():
 Run: `pytest tests/test_api.py -v`
 Expected: FAIL — `en.Runtime` missing.
 
-- [ ] **Step 3: Write `executorch_numpy/_api.py`**
+- [ ] **Step 3: Write `executorch_numpy_runtime/_api.py`**
 
 ```python
 from __future__ import annotations
@@ -1467,7 +1467,7 @@ class Runtime:
         return Program(rt)
 ```
 
-- [ ] **Step 4: Export from `executorch_numpy/__init__.py`**
+- [ ] **Step 4: Export from `executorch_numpy_runtime/__init__.py`**
 
 ```python
 from ._core import __et_version__
@@ -1495,7 +1495,7 @@ Expected: all PASS.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add executorch_numpy/_api.py executorch_numpy/__init__.py tests/test_api.py
+git add executorch_numpy_runtime/_api.py executorch_numpy_runtime/__init__.py tests/test_api.py
 git commit -m "feat: high-level Runtime/Program/Method numpy API"
 ```
 
@@ -1561,7 +1561,7 @@ Expected: `dynamic.pte` and (ideally) `quantized.pte` created.
 ```python
 import numpy as np
 import pytest
-import executorch_numpy as en
+import executorch_numpy_runtime as en
 from tests.conftest import model_or_skip
 
 def _method(name, meth="forward"):
@@ -1603,7 +1603,7 @@ def test_mixed_dtype_model():
 
 ```python
 import numpy as np
-import executorch_numpy as en
+import executorch_numpy_runtime as en
 from tests.conftest import model_or_skip
 
 def test_float32_roundtrip_fidelity():
@@ -1618,7 +1618,7 @@ def test_float32_roundtrip_fidelity():
 ```python
 import numpy as np
 import pytest
-import executorch_numpy as en
+import executorch_numpy_runtime as en
 from tests.conftest import model_or_skip
 
 torch = pytest.importorskip("torch")  # never a package dep; skipped if torch absent
@@ -1789,7 +1789,7 @@ git commit -m "test: ASan/LSan leak harness over et_core as a merge gate"
 
 ```python
 from pathlib import Path
-import executorch_numpy as en
+import executorch_numpy_runtime as en
 
 README = Path(__file__).parent.parent / "README.md"
 
@@ -1812,19 +1812,19 @@ Expected: FAIL — no README.
 - [ ] **Step 3: Write `README.md`**
 
 ```markdown
-# executorch-numpy
+# executorch-numpy-runtime
 
 A torch-free Python runtime for ExecuTorch `.pte` files. **numpy is the only required
 dependency.** Loads and runs arbitrary CPU-targeted `.pte` artifacts.
 
 ## Install
-    pip install executorch-numpy            # numpy only
-    pip install executorch-numpy[bf16]      # + ml_dtypes for real bfloat16
+    pip install executorch-numpy-runtime            # numpy only
+    pip install executorch-numpy-runtime[bf16]      # + ml_dtypes for real bfloat16
 
 Wheels: `cp312-abi3`, `manylinux_2_28_x86_64`, Python 3.12+.
 
 ## Quick start
-    import numpy as np, executorch_numpy as en
+    import numpy as np, executorch_numpy_runtime as en
     prog = en.Runtime.get().load_program("model.pte")
     out = prog.load_method("forward")([np.ones(3, np.float32), np.ones(3, np.float32)])
 
