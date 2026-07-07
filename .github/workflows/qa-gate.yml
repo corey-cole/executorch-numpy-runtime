@@ -23,12 +23,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       
-      - name: Install GitHub CLI
+      - name: Install additional RPM dependencies
         run: |
           dnf install -y dnf-plugins-core
           dnf config-manager --add-repo https://cli.github.com/packages/rpm/gh-cli.repo
           dnf install -y -q gh
           gh --version
+          TOOLSET_VER="$(gcc -dumpversion | cut -d. -f1)"
+          dnf install -y -q "gcc-toolset-${TOOLSET_VER}-libasan-devel" || true
+          dnf install -y -q "gcc-toolset-${TOOLSET_VER}-libtsan-devel" || true
 
       # Although not technically required, we want to verify that the runtime provenance is valid before we run
       # any tests to avoid useless test cycles   
