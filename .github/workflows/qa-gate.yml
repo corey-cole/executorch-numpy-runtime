@@ -21,7 +21,15 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v7     
+      - uses: actions/checkout@v7
+      
+      - name: Install GitHub CLI
+        run: |
+          dnf install -y dnf-plugins-core
+          dnf config-manager --add-repo https://cli.github.com/packages/rpm/gh-cli.repo
+          dnf install -y gh
+          gh --version
+
       # Although not technically required, we want to verify that the runtime provenance is valid before we run
       # any tests to avoid useless test cycles   
       - name: Download ExecuTorch runtime library
