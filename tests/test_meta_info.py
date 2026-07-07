@@ -1,6 +1,6 @@
 import executorch_numpy_runtime as en
 from executorch_numpy_runtime import _core
-from tests.conftest import model_or_skip
+from conftest import model_or_skip
 
 
 def test_method_meta_shapes():

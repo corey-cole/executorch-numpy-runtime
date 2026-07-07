@@ -1,6 +1,6 @@
 import numpy as np
 from executorch_numpy_runtime import _core
-from tests.conftest import model_or_skip
+from conftest import model_or_skip
 
 
 def test_add_forward_correct():

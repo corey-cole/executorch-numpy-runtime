@@ -254,6 +254,9 @@ poetry.toml
 # LSP config files
 pyrightconfig.json
 
+# cibuildwheel output
+wheelhouse/
+
 ### VisualStudioCode ###
 .vscode/*
 !.vscode/settings.json

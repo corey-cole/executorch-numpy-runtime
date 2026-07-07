@@ -1,6 +1,6 @@
 import numpy as np
 import executorch_numpy_runtime as en
-from tests.conftest import model_or_skip
+from conftest import model_or_skip
 
 def test_high_level_forward():
     prog = en.Runtime.get().load_program(model_or_skip("add.pte"))

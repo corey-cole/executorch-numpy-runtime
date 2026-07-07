@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 import executorch_numpy_runtime as en
-from tests.conftest import model_or_skip
+from conftest import model_or_skip
 
 torch = pytest.importorskip("torch")  # never a package dep; skipped if torch absent
 

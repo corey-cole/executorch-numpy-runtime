@@ -1,6 +1,6 @@
 import numpy as np
 import executorch_numpy_runtime as en
-from tests.conftest import model_or_skip
+from conftest import model_or_skip
 
 
 def _method(name, meth="forward"):

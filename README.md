@@ -99,19 +99,17 @@ For contributors building from source.
 
 ### Prerequisites
 
-- Python **3.12+**, CMake **≥ 3.24**, a C++17 compiler, and `nm` (binutils).
+- Python **3.12+**, CMake **≥ 3.26**, a C++17 compiler, and `nm` (binutils).
 - The prebuilt, position-independent ExecuTorch **1.3.1** runtime. This project does **not** build ExecuTorch itself — it links a pinned, attested static-lib tarball from
   [`executorch-runtime-dist`](https://github.com/measly-java-learning/executorch-runtime-dist/releases).
 
-### 1. Fetch the runtime
+### 1. Runtime fetch (automatic)
 
-Download `executorch-runtime-1.3.1-logging-linux-x86_64.tar.gz` and unpack it into `third_party/` so that this path exists:
+`cmake/RuntimePin.cmake` pins the tarball URL + SHA256 for the current ExecuTorch release and fetches + hash-verifies it via CMake's `FetchContent` — no manual download step needed for a normal build.
 
-```
-third_party/executorch-runtime-1.3.1-logging-linux-x86_64/lib/cmake/ExecuTorch/executorch-config.cmake
-```
+If you'd rather point at a runtime you've unpacked yourself (e.g. a local rebuild, or an air-gapped environment), pass `-DETNP_RUNTIME_PREFIX=/path/to/executorch-runtime-1.3.1-logging-linux-x86_64` and the fetch is skipped in favor of that prefix; the build fails early with a clear message if it doesn't contain `lib/cmake/ExecuTorch/executorch-config.cmake`.
 
-`cmake/RuntimePin.cmake` points at that prefix; the build fails early with a clear message if it's missing.
+In CI, provenance (that the tarball came from `executorch-runtime-dist`'s own release CI, not just that its bytes match the pinned hash) is verified separately with `gh attestation verify --repo measly-java-learning/executorch-runtime-dist`, mirroring the pattern in `djl-executorch-engine/native/.github/workflows/native-build-job.yml`.
 
 ### 2. Build (editable install)
 
@@ -171,6 +169,13 @@ Expect `race_harness: ... OK` and exit 0; a data race → non-zero exit.
 - **`setarch -R` is required** on recent (6.x) kernels: high ASLR entropy (`vm.mmap_rnd_bits`) makes TSan abort with `FATAL: unexpected memory mapping`. `setarch -R` disables ASLR for the child process — no root needed.
 - **Scope — read before trusting a green run.** The prebuilt ExecuTorch libs are **not** TSan-instrumented, so this gate sees races in *our* code (`et_core`, the binding) but is **blind to races inside ExecuTorch itself** (`Module::methods_`, XNNPACK, pthreadpool). This was verified empirically: injecting an unsynchronized write into `run_method` **is** caught; removing the `method_meta`/`method_names` locks (whose race lives inside ExecuTorch's uninstrumented `methods_`) is **not**. So the gate protects synchronization of the data structures *we* own and guards against that regression class — it does **not** validate our serialization of ExecuTorch's internal state. Doing that would need a TSan-instrumented ExecuTorch build (the attested tarball isn't one).
 - `native_tests/tsan_suppressions.txt` quiets known-noisy uninstrumented frames; refine it per toolchain (none were needed on the reference build).
+
+### 7. Verify `cibuildwheel` locally
+
+CI uses `cibuildwheel` to build, audit, and test the package.  Note that the CMake cache is sensitive to the differences in build paths between local and container builds.
+Therefore, before executing this step, ensure that the `build/` directory is empty.
+
+`uvx cibuildwheel --platform linux`
 
 ### Layout
 

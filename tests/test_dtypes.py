@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 import executorch_numpy_runtime as en
 from executorch_numpy_runtime import _core
-from tests.conftest import model_or_skip
+from conftest import model_or_skip
 
 # ScalarType codes (ExecuTorch/PyTorch canonical): used only to assert the mapping.
 ST = dict(Byte=0, Char=1, Short=2, Int=3, Long=4, Half=5, Float=6,

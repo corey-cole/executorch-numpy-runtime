@@ -1,6 +1,6 @@
 import pytest
 from executorch_numpy_runtime import _core
-from tests.conftest import model_or_skip
+from conftest import model_or_skip
 
 def test_load_path_lists_methods():
     rt = _core.load_path(model_or_skip("add.pte"))

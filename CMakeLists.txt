@@ -23,7 +23,7 @@ foreach(_libm_tgt xnnpack-microkernels-prod XNNPACK xnnpack-hardware-config xnnp
 endforeach()
 
 # nanobind via scikit-build-core-provided Python
-find_package(Python 3.12 REQUIRED COMPONENTS Interpreter Development.Module)
+find_package(Python 3.12 REQUIRED COMPONENTS Interpreter Development.Module Development.SABIModule)
 execute_process(COMMAND "${Python_EXECUTABLE}" -m nanobind --cmake_dir
                 OUTPUT_VARIABLE nanobind_ROOT OUTPUT_STRIP_TRAILING_WHITESPACE)
 find_package(nanobind CONFIG REQUIRED)

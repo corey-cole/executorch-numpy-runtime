@@ -3,7 +3,7 @@ import pytest
 from executorch_numpy_runtime import _core
 from executorch_numpy_runtime.errors import (
     ExecuTorchError, ProgramLoadError, BackendNotAvailable, ExecutionError)
-from tests.conftest import model_or_skip, MODELS
+from conftest import model_or_skip, MODELS
 
 def test_corrupt_pte_raises_program_load_error(tmp_path):
     bad = tmp_path / "bad.pte"; bad.write_bytes(b"not a real pte" * 10)
