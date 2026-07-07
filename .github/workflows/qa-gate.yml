@@ -17,7 +17,10 @@ jobs:
             runner: ubuntu-latest
             image: quay.io/pypa/manylinux_2_28_x86_64
     runs-on: ${{ matrix.runner }}
-    container: ${{ matrix.image }}
+    # SYS_ADMIN is required for setarch -R to work in the race harness
+    container:
+      image: ${{ matrix.image }}
+      options: --cap-add=SYS_ADMIN
     permissions:
       contents: read
     steps:
