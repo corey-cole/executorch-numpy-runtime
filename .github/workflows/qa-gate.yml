@@ -46,7 +46,7 @@ jobs:
       - name: Generate add.pte
         run: |
           export PATH=/opt/python/cp312-cp312/bin:$PATH
-          python -m pip install executorch==1.3.1 torch==2.12.0+cpu --index-url https://download.pytorch.org/whl/cpu --quiet
+          python -m pip install executorch==1.3.1 torch==2.12.0+cpu --extra-index-url https://download.pytorch.org/whl/cpu --quiet
           python tools/export_fixtures.py tests/models
 
       - name: Build + run leak harness
