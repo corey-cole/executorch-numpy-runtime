@@ -1,5 +1,8 @@
+import numpy as np
 import pytest
+import executorch_numpy_runtime as en
 from executorch_numpy_runtime import _core
+from tests.conftest import model_or_skip
 
 # ScalarType codes (ExecuTorch/PyTorch canonical): used only to assert the mapping.
 ST = dict(Byte=0, Char=1, Short=2, Int=3, Long=4, Half=5, Float=6,
@@ -31,10 +34,6 @@ def test_unmapped_numpy_raises():
     with pytest.raises(Exception):
         _core._np_to_st("c", 16)  # complex128 unsupported
 
-
-import numpy as np
-import executorch_numpy_runtime as en
-from tests.conftest import model_or_skip
 
 def test_float32_roundtrip_fidelity():
     m = en.Runtime.get().load_program(model_or_skip("add.pte")).load_method("forward")
