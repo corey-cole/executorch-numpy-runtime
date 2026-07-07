@@ -1,8 +1,16 @@
 from . import _core
 
 _SUPPORTED_DTYPES = [
-    "float32", "float64", "float16", "int64", "int32",
-    "int16", "int8", "uint8", "bool", "uint16(bfloat16-bits)",
+    "float32",
+    "float64",
+    "float16",
+    "int64",
+    "int32",
+    "int16",
+    "int8",
+    "uint8",
+    "bool",
+    "uint16(bfloat16-bits)",
 ]
 
 

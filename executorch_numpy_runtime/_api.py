@@ -3,6 +3,7 @@ from typing import Sequence, Union
 import numpy as np
 from . import _core
 
+
 class Method:
     def __init__(self, runtime: "_core._Runtime", name: str):
         self._rt = runtime
@@ -17,6 +18,7 @@ class Method:
         arrs = [np.ascontiguousarray(a) for a in inputs]
         return self._rt.run_method(self._name, arrs)
 
+
 class Program:
     def __init__(self, runtime: "_core._Runtime"):
         self._rt = runtime
@@ -28,8 +30,10 @@ class Program:
     def load_method(self, name: str) -> Method:
         if name not in self._rt.method_names():
             from .errors import ProgramLoadError
+
             raise ProgramLoadError(f"method '{name}' not found in program")
         return Method(self._rt, name)
+
 
 class Runtime:
     _instance: "Runtime | None" = None
