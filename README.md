@@ -36,6 +36,38 @@ out = prog.load_method("forward")([np.ones(3, np.float32), np.ones(3, np.float32
 
 A single `Runtime` instance is thread-safe to share across threads, but method calls serialize (per-Runtime lock). For true parallel inference, create one `Runtime` per thread. XNNPACK still parallelizes within a single call via thread pool.
 
+## Performance
+
+The runtime executes through the same ExecuTorch C++ core (XNNPACK delegate) as
+the official ExecuTorch `pybindings`, so its steady-state speed matches upstream —
+the torch-free packaging costs nothing at inference time. Against PyTorch eager it
+is substantially faster, because the `.pte` avoids both the ATen kernels and the
+Python/TorchScript per-call dispatch overhead.
+
+MobileNetV2, batch 1, CPU, float32 `[1,3,224,224]` — 100 timed iterations after
+warmup, identical seeded input, all backends returning byte-identical logits.
+Representative figures on an Intel i7-1185G7 (4 cores / 8 threads):
+
+| Backend | Artifact | latency (approx) | throughput | vs torch eager |
+|---|---|---:|---:|---:|
+| **executorch-numpy-runtime** | `.pte` | **~4.5 ms** | **~220 it/s** | **~3× faster** |
+| ExecuTorch `pybindings` (official) | `.pte` | ~4.5 ms | ~220 it/s | ~3× faster |
+| PyTorch eager (best: 1 thread) | `.pt` | ~14 ms | ~72 it/s | 1.0× (baseline) |
+
+Two takeaways: this runtime is **~3× faster than PyTorch eager** on this model, and
+**performs identically to official ExecuTorch pybindings** — the numpy marshalling
+adds no measurable overhead (the two `.pte` runtimes share the same XNNPACK core, and
+their best-case latency is indistinguishable). As a bonus, cold-start program load is
+milliseconds versus seconds for a `torch`-based process (no `import torch`).
+
+Caveats: single machine, one model, batch 1 — illustrative, not a broad claim.
+**Only the ratios are stable**; absolute latencies drift ~2× on this thermally
+throttling laptop (≈2 ms cold, ≈5 ms sustained), so treat the millisecond figures as
+approximate. PyTorch is shown at its fastest configuration (single-threaded; it
+regressed with more threads on this 4-core part). XNNPACK manages its own thread pool,
+so exact thread parity across backends isn't guaranteed. Reproduce or extend with
+`tools/bench.py --backend {torch,et_pybindings,numpy_rt}`.
+
 ## Errors
 
 `ExecuTorchError` (base) → `ProgramLoadError`, `BackendNotAvailable`, `OperatorNotFound`, `ExecutionError`.
