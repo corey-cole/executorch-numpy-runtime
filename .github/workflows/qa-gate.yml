@@ -27,7 +27,7 @@ jobs:
         run: |
           dnf install -y dnf-plugins-core
           dnf config-manager --add-repo https://cli.github.com/packages/rpm/gh-cli.repo
-          dnf install -y gh
+          dnf install -y -q gh
           gh --version
 
       # Although not technically required, we want to verify that the runtime provenance is valid before we run
@@ -40,6 +40,7 @@ jobs:
           test -n "${url}" || { echo "no logging URL in RuntimePin.cmake"; exit 1; }
           curl -fL -o runtime.tgz "${url}"
           gh attestation verify runtime.tgz --repo measly-java-learning/executorch-runtime-dist
+          mkdir -p third_party
           tar -xzf runtime.tgz -C third_party
 
       - name: Generate add.pte
