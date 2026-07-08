@@ -62,6 +62,14 @@ static HeldInput make_held_input(nb::handle obj, bool* was_contig = nullptr) {
 // mandatory-copy, `OWNDATA=True` semantics this binding must guarantee.
 // (Verified by reading the installed nanobind 2.13.0 source, not assumed.)
 static nb::object copy_out(const etnp::OutputView& v) {
+  // Scalar EValues (from constant_methods) surface as native Python scalars,
+  // matching executorch.runtime.Method.execute -> [128] / [2.5] / [True].
+  switch (v.kind) {
+    case etnp::OutputKind::Int:    return nb::int_(v.int_val);
+    case etnp::OutputKind::Bool:   return nb::bool_(v.int_val != 0);
+    case etnp::OutputKind::Double: return nb::float_(v.double_val);
+    case etnp::OutputKind::Tensor: break;  // fall through to the ndarray path
+  }
   etnp::NpDtype d = etnp::scalar_type_to_numpy(v.scalar_type);
   size_t ndim = v.shape.size();
   std::vector<size_t> shape(v.shape.begin(), v.shape.end());

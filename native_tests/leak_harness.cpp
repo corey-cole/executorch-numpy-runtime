@@ -1,5 +1,9 @@
 // ASan/LSan leak harness over et_core (no Python). LSan reports unfreed allocations at
 // exit; a leak -> non-zero exit. Model-agnostic: inputs derived from method_meta().
+// Also runs every zero-input method (e.g. constant_methods emitting scalar
+// int/double/bool or tensor EValues) so the scalar-output path is leak-gated;
+// this is a no-op for models whose only method is forward(). Point it at
+// tests/models/const_methods.pte to cover the scalar branch.
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -19,6 +23,18 @@ int main(int argc, char** argv) {
   const char* pte = (argc > 1) ? argv[1] : "tests/models/add.pte";
   const int outer = (argc > 2) ? std::atoi(argv[2]) : 500;
   const int fwd_per_load = 4;
+  // Discover zero-input (constant) method names once. method_meta() probes each
+  // output's TensorInfo, and ExecuTorch logs a line per non-tensor (scalar)
+  // output, so doing this per-iteration would flood stderr for no added
+  // coverage -- the method set is invariant across loads of the same .pte.
+  std::vector<std::string> const_methods;
+  {
+    auto rt = Runtime::load_path(pte);
+    for (const auto& mname : rt->method_names()) {
+      if (mname == "forward") continue;                    // exercised below
+      if (rt->method_meta(mname).inputs.empty()) const_methods.push_back(mname);
+    }
+  }
   for (int it = 0; it < outer; ++it) {
     auto rt = Runtime::load_path(pte);              // load/destroy balance
     auto meta = rt->method_meta("forward");
@@ -38,6 +54,12 @@ int main(int argc, char** argv) {
     }
     for (int f = 0; f < fwd_per_load; ++f) {
       auto res = rt->run_method("forward", inputs);  // per-forward allocations
+      (void)res.outputs();
+    }
+    // Exercise every zero-input method: constant_methods surface as scalar
+    // (int/double/bool) or tensor EValues through run_method's output path.
+    for (const auto& mname : const_methods) {
+      auto res = rt->run_method(mname, {});
       (void)res.outputs();
     }
   }
