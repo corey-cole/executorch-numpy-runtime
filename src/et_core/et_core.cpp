@@ -171,29 +171,53 @@ ForwardResult Runtime::run_method(const std::string& name,
     fs->storage.reserve(result->size());
     fs->views.reserve(result->size());
     for (auto& ev : *result) {
-      // Defensive: EValue::toTensor() is ET_CHECK_MSG(isTensor(), ...) --
-      // an uncatchable et_pal_abort() on a non-tensor EValue, which would
-      // crash the whole interpreter instead of raising a Python exception.
-      // We could not produce a real non-tensor-output .pte to exercise this
-      // via a fixture: torch.export + to_edge_transform_and_lower asserts
-      // internally ("graph_output_allocated not set") on graphs whose output
-      // is a bare int/scalar (tried returning `a.shape[0]` and
-      // `a.sum().item()` under the ExecuTorch 1.3.1 export pipeline), so
-      // ordinary export tooling appears unable to emit such a program. The
-      // guard is kept anyway as correct, cheap defense against any .pte
-      // (however produced) whose method genuinely returns a non-tensor.
+      // Scalar EValues: ExecuTorch emits these for constant_methods that return
+      // a plain Python scalar (e.g. get_max_seq_len -> 128). Carry them by value;
+      // the binding surfaces them as native Python int/float/bool, matching
+      // ExecuTorch's own pybind runtime (executorch.runtime.Method.execute).
+      // Each accessor is guarded by its is*() so we never hit toTensor()/toInt()'s
+      // ET_CHECK_MSG (an uncatchable et_pal_abort() on a tag mismatch).
+      if (ev.isInt()) {
+        OutputView v;
+        v.kind = OutputKind::Int;
+        v.int_val = ev.toInt();
+        fs->views.push_back(std::move(v));
+        continue;
+      }
+      if (ev.isDouble()) {
+        OutputView v;
+        v.kind = OutputKind::Double;
+        v.double_val = ev.toDouble();
+        fs->views.push_back(std::move(v));
+        continue;
+      }
+      if (ev.isBool()) {
+        OutputView v;
+        v.kind = OutputKind::Bool;
+        v.int_val = ev.toBool() ? 1 : 0;
+        fs->views.push_back(std::move(v));
+        continue;
+      }
+      // Anything else (string, list, none, tensor-list) is genuinely
+      // unsupported: raise rather than let toTensor() abort the interpreter.
       if (!ev.isTensor()) {
         throw EtException({ErrorKind::Execution,
-            "method '" + name + "' returned a non-tensor output (unsupported)", ""});
+            "method '" + name +
+            "' returned an unsupported non-tensor output "
+            "(only tensor/int/float/bool are supported)", ""});
       }
       const auto& t = ev.toTensor();
       std::vector<uint8_t> buf(t.nbytes());
       std::memcpy(buf.data(), t.const_data_ptr(), t.nbytes());  // copy OUT of arena
       std::vector<int64_t> shp(t.sizes().begin(), t.sizes().end());
+      OutputView v;
+      v.kind = OutputKind::Tensor;
+      v.shape = std::move(shp);
+      v.scalar_type = static_cast<int8_t>(t.scalar_type());
       fs->storage.push_back(std::move(buf));
-      fs->views.push_back(OutputView{std::move(shp),
-          static_cast<int8_t>(t.scalar_type()),
-          fs->storage.back().data(), fs->storage.back().size()});
+      v.data = fs->storage.back().data();
+      v.nbytes = fs->storage.back().size();
+      fs->views.push_back(std::move(v));
     }
   }  // lock released: OutputViews now point into owned storage, never the arena
   return ForwardResult(std::move(fs));
