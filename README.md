@@ -28,6 +28,8 @@ out = prog.load_method("forward")([np.ones(3, np.float32), np.ones(3, np.float32
 
 - **Operators: core ATen + optimized + quantized kernels.** **Custom operators are NOT included. torchao low-bit kernels are NOT included.**
 
+- **Custom kernels:** compile your own ExecuTorch kernels into the runtime — see [docs/custom-kernels.md](docs/custom-kernels.md).
+
 - **Dtypes:** float32, float64, float16, int64, int32, int16, int8, uint8, bool. **BFloat16 is surfaced as raw `uint16` bits** (no native numpy bf16). Install the `[bf16]` extra for a real `ml_dtypes.bfloat16` dtype. Note: `uint16` inputs are interpreted as BFloat16. Unsupported dtypes raise.
 
 - **Outputs are always fresh copies** — never views into runtime memory; safe to keep across subsequent calls.
