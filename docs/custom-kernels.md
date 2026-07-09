@@ -77,3 +77,36 @@ computations is worthless), then prints a
 table. The custom op's `.pte` size is independent of sequence length `T` (the op
 is opaque, so weights are baked once), while the naive path unrolls per timestep —
 so the size advantage widens sharply with `T`.
+
+### Feasibility crossover (Task 6)
+
+`tools/lstm_feasibility.py` answers a narrower question than the benchmark
+above: is there a `T` at which naive decomposition stops being *practical* to
+export at all, while the custom op stays trivial? It sweeps `T` at a fixed
+`H=128`, running each naive and custom export attempt in a **child process**
+under a hard wall-clock `subprocess.run(..., timeout=...)`. This matters
+because a large-`T` naive export doesn't error — it just runs for a very long
+time (an earlier manual attempt at `T=256, H=128` ran past 10 minutes at 100%
+CPU before being killed) — so only an external timeout, not a try/except,
+can bound it.
+
+Declared practicality budgets (arbitrary but explicit — see the constants at
+the top of the script):
+
+- `EXPORT_TIME_BUDGET_S = 120` seconds per export attempt
+- `SIZE_BUDGET_MB = 8` for the resulting `.pte`
+
+Observed crossover: **`T* = 256` at `H=128`**. Naive export succeeds at
+`T=16` (15.5s, 593KB) and `T=64` (49.6s, 768KB), then exceeds the 120s time
+budget at `T=256` and `T=1024` (both killed at the timeout, no `.pte`
+produced). The custom `etnp::lstm` export succeeds at every `T` in ~5-6s and
+produces a constant-size `.pte` (~530KB) since the op stays opaque and the
+sequence loop lives in the kernel, not in the graph. The custom `.pte` for
+`T=256, H=128` — the first config naive cannot produce within budget — is the
+durable artifact for this task.
+
+"Impossible" here means *exceeds the declared time/size budget above*, not a
+universal impossibility — a longer timeout or more patience might eventually
+produce a naive `.pte` at `T=256`. The point is the practical crossover: past
+`T*`, naive decomposition is not something you would reach for, while the
+custom op is unaffected by `T` at all.
