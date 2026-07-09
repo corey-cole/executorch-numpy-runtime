@@ -47,3 +47,33 @@ Prefer allocating scratch via the `KernelRuntimeContext` temp allocator over raw
 `malloc`/`new`; kernels that own raw allocations and skip freeing them surface
 here as leaks. (Registration itself is a one-time static allocation LSan ignores,
 so only per-invocation allocations in the kernel body are flagged.)
+
+## Benchmarking the LSTM example
+
+The `examples/custom_kernels/lstm/` op (`etnp::lstm.out`) ships with a throwaway
+MVP benchmark comparing it against ExecuTorch's naive LSTM decomposition on
+`.pte` size and execution latency, using identical weights and inputs.
+
+Because the default wheel does not bundle the LSTM op, build a benchmark-only
+wheel with the kernel injected, then run the harness in a throwaway venv:
+
+    # 1. Export both .pte's (naive nn.LSTM vs custom op) in the torch export venv.
+    #    Run from the repo root so `tools` resolves as a package.
+    /path/to/export-venv/bin/python tools/export_lstm_bench_models.py /tmp/lstm_ptes
+
+    # 2. Build a wheel WITH the LSTM kernel compiled in.
+    CMAKE_ARGS="-DETNP_EXTRA_KERNEL_SOURCES=$PWD/examples/custom_kernels/lstm/etnp_lstm.cpp" \
+      uv build --wheel -o /tmp/lstm_bench_wheel
+
+    # 3. Install it into a fresh torch-free venv and run the bench.
+    uv venv /tmp/lstm_bench_venv --python 3.12
+    VIRTUAL_ENV=/tmp/lstm_bench_venv uv pip install /tmp/lstm_bench_wheel/*.whl numpy
+    /tmp/lstm_bench_venv/bin/python tools/bench_lstm.py /tmp/lstm_ptes
+
+`bench_lstm.py` loads both `.pte`s in this runtime, cross-checks the custom vs
+naive outputs at rtol 1e-4 (the honesty gate — a benchmark of two different
+computations is worthless), then prints a
+`config | naive_size | custom_size | naive_ms | custom_ms | size_ratio | speedup`
+table. The custom op's `.pte` size is independent of sequence length `T` (the op
+is opaque, so weights are baked once), while the naive path unrolls per timestep —
+so the size advantage widens sharply with `T`.
