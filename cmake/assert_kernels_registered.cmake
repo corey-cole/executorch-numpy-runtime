@@ -46,8 +46,10 @@ foreach(_tu IN LISTS EXTRA_TUS)
   if(_tu STREQUAL "")
     continue()
   endif()
-  string(FIND "${_syms}" "${_tu}" _pos)
-  if(_pos EQUAL -1)
+  string(REGEX REPLACE "\\." "\\\\." _tu_escaped "${_tu}")
+  string(REGEX MATCHALL "${_tu_escaped}" _tu_matches "${_syms}")
+  list(LENGTH _tu_matches _tu_count)
+  if(_tu_count LESS 1)
     message(FATAL_ERROR
       "Custom-kernel registration '${_tu}' was dropped from ${SO}: static-init TU absent. "
       "whole-archive regressed for etnp_kernels -> custom op not found at model-load time.")
