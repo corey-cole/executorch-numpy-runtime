@@ -1,5 +1,7 @@
 # Sequence-level LSTM Kernel Implementation Plan
 
+**Tracking issue:** [#4](https://github.com/corey-cole/executorch-numpy-runtime/issues/4) — reference in the PR (`Closes #4`) to close the loop.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Implement a single-layer, unidirectional `etnp::lstm` custom kernel that runs a whole sequence in C++, reusing XNNPACK's fully-connected microkernels for the gate projections (create-once / run-per-timestep) and fusing the gate activations + cell/hidden update — validated for numerical parity against `torch.nn.LSTM`.
