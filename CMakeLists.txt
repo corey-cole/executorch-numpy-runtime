@@ -7,6 +7,7 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 include(cmake/RuntimePin.cmake)
 list(APPEND CMAKE_PREFIX_PATH "${ETNP_RUNTIME_PREFIX}")
 find_package(ExecuTorch CONFIG REQUIRED)
+include(cmake/Kernels.cmake)
 
 # nanobind via scikit-build-core-provided Python
 find_package(Python 3.12 REQUIRED COMPONENTS Interpreter Development.Module Development.SABIModule)
@@ -30,11 +31,17 @@ target_link_libraries(_core PRIVATE
   executorch optimized_native_cpu_ops_lib xnnpack_backend quantized_ops_lib
   extension_module_static extension_data_loader extension_tensor)
 
+if(TARGET etnp_kernels)
+  target_link_libraries(_core PRIVATE "$<LINK_LIBRARY:WHOLE_ARCHIVE,etnp_kernels>")
+endif()
+
 target_compile_definitions(_core PRIVATE ETNP_ET_VERSION="${ETNP_ET_VERSION}")
 
-# Post-link kernel-registration guard (fail the BUILD, not runtime).
+# Post-link kernel-registration guard (fail the BUILD, not runtime). The custom
+# kernel seam appends its expected registrar TUs via ETNP_KERNEL_EXPECT_TUS.
 add_custom_command(TARGET _core POST_BUILD
   COMMAND ${CMAKE_COMMAND} -DSO=$<TARGET_FILE:_core> -DNM=nm
+          "-DEXTRA_TUS=${ETNP_KERNEL_EXPECT_TUS}"
           -P ${CMAKE_SOURCE_DIR}/cmake/assert_kernels_registered.cmake
   VERBATIM)
 
