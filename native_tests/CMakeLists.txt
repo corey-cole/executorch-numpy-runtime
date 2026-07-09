@@ -67,6 +67,10 @@ if(TARGET etnp_kernels)
             "-DEXTRA_TUS=${ETNP_KERNEL_EXPECT_TUS}"
             -P ${CMAKE_SOURCE_DIR}/../cmake/assert_kernels_registered.cmake
     VERBATIM)
+
+  add_executable(lstm_parity_test lstm_parity_test.cpp)
+  target_link_libraries(lstm_parity_test PRIVATE
+    ${ETNP_HARNESS_LIBS} "$<LINK_LIBRARY:WHOLE_ARCHIVE,etnp_kernels>")
 endif()
 
 # XNNPACK-FC helper unit test (Task 1). Isolated: does NOT need etnp_kernels.

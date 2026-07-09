@@ -77,6 +77,15 @@ jobs:
           nm "$(find build/inject -name kernel_registration_test -type f | head -1)" \
             | grep -q '_GLOBAL__sub_I_negate_op.cpp'
 
+      - name: Build + run LSTM example kernel tests
+        run: |
+          cmake -S native_tests -B build/lstm \
+            -DETNP_EXTRA_KERNEL_SOURCES="$PWD/examples/custom_kernels/lstm/etnp_lstm.cpp"
+          cmake --build build/lstm --target xnn_linear_test lstm_kernel_test lstm_parity_test
+          ./build/lstm/xnn_linear_test
+          ./build/lstm/lstm_kernel_test
+          ./build/lstm/lstm_parity_test
+
       # Race harness is problematic when running in a container on GitHub Actions
       # Will research and re-enable later
       #- name: Build + run race harness
