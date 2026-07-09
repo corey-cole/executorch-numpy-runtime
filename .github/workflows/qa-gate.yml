@@ -61,6 +61,22 @@ jobs:
           cmake -S native_tests -B build/leak && cmake --build build/leak
           ASAN_OPTIONS=detect_leaks=1 ./build/leak/leak_harness tests/models/add.pte 500
 
+      - name: Build + run custom-kernel registration test
+        run: |
+          cmake -S native_tests -B build/kernels && cmake --build build/kernels --target kernel_registration_test kernel_leak_test
+          ./build/kernels/kernel_registration_test
+          ASAN_OPTIONS=detect_leaks=1 ./build/kernels/kernel_leak_test
+
+      - name: Verify custom-kernel injection seam
+        run: |
+          cmake -S native_tests -B build/inject \
+            -DETNP_EXTRA_KERNEL_SOURCES="$PWD/examples/custom_kernels/negate_op.cpp"
+          cmake --build build/inject --target kernel_registration_test
+          # The POST_BUILD guard fatal-errors if the injected registrar was dropped;
+          # a successful build is the assertion. Double-check the symbol is present:
+          nm "$(find build/inject -name kernel_registration_test -type f | head -1)" \
+            | grep -q '_GLOBAL__sub_I_negate_op.cpp'
+
       # Race harness is problematic when running in a container on GitHub Actions
       # Will research and re-enable later
       #- name: Build + run race harness

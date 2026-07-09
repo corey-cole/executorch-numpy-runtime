@@ -39,4 +39,21 @@ if(_codegen_count LESS 2)
     "op not found at model-load time.")
 endif()
 
+# Caller-supplied extra static-init TUs that must also survive the final link
+# (custom kernels compiled into etnp_kernels and whole-archived into the target).
+# EXTRA_TUS is a CMake list of "_GLOBAL__sub_I_<source-basename>" symbol names.
+foreach(_tu IN LISTS EXTRA_TUS)
+  if(_tu STREQUAL "")
+    continue()
+  endif()
+  string(REGEX REPLACE "\\." "\\\\." _tu_escaped "${_tu}")
+  string(REGEX MATCHALL "${_tu_escaped}" _tu_matches "${_syms}")
+  list(LENGTH _tu_matches _tu_count)
+  if(_tu_count LESS 1)
+    message(FATAL_ERROR
+      "Custom-kernel registration '${_tu}' was dropped from ${SO}: static-init TU absent. "
+      "whole-archive regressed for etnp_kernels -> custom op not found at model-load time.")
+  endif()
+endforeach()
+
 message(STATUS "assert_kernels_registered: XNNPACK + quantized + optimized registration TUs present in ${SO}")
