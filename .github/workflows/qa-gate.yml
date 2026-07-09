@@ -61,6 +61,12 @@ jobs:
           cmake -S native_tests -B build/leak && cmake --build build/leak
           ASAN_OPTIONS=detect_leaks=1 ./build/leak/leak_harness tests/models/add.pte 500
 
+      - name: Build + run custom-kernel registration test
+        run: |
+          cmake -S native_tests -B build/kernels && cmake --build build/kernels --target kernel_registration_test kernel_leak_test
+          ./build/kernels/kernel_registration_test
+          ASAN_OPTIONS=detect_leaks=1 ./build/kernels/kernel_leak_test
+
       # Race harness is problematic when running in a container on GitHub Actions
       # Will research and re-enable later
       #- name: Build + run race harness

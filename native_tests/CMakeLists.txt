@@ -10,6 +10,7 @@ find_package(Threads REQUIRED)
 include(${CMAKE_SOURCE_DIR}/../cmake/RuntimePin.cmake)
 list(APPEND CMAKE_PREFIX_PATH "${ETNP_RUNTIME_PREFIX}")
 find_package(ExecuTorch CONFIG REQUIRED)
+include(${CMAKE_SOURCE_DIR}/../cmake/Kernels.cmake)
 
 set(ETNP_HARNESS_LIBS
   executorch optimized_native_cpu_ops_lib xnnpack_backend quantized_ops_lib
@@ -29,3 +30,26 @@ target_include_directories(race_harness PRIVATE ${CMAKE_SOURCE_DIR}/../src)
 target_compile_options(race_harness PRIVATE -fsanitize=thread -g -O1)
 target_link_options(race_harness PRIVATE -fsanitize=thread)
 target_link_libraries(race_harness PRIVATE ${ETNP_HARNESS_LIBS} Threads::Threads)
+
+# Registration + dispatch gate for the custom-kernel seam. Whole-archives
+# etnp_kernels so the registrar TUs survive, then the shared nm-guard asserts
+# they did (covers any ETNP_EXTRA_KERNEL_SOURCES injected into this build too).
+add_executable(kernel_registration_test kernel_registration_test.cpp)
+target_link_libraries(kernel_registration_test PRIVATE
+  ${ETNP_HARNESS_LIBS} "$<LINK_LIBRARY:WHOLE_ARCHIVE,etnp_kernels>")
+
+add_custom_command(TARGET kernel_registration_test POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -DSO=$<TARGET_FILE:kernel_registration_test> -DNM=nm
+          "-DEXTRA_TUS=${ETNP_KERNEL_EXPECT_TUS}"
+          -P ${CMAKE_SOURCE_DIR}/../cmake/assert_kernels_registered.cmake
+  VERBATIM)
+
+# Leak variant (ASan/LSan): the exemplar a consumer copies to leak-check an
+# allocating custom kernel. Same source, invoked directly (no .pte, so no export
+# dependency); catches per-invocation allocations the kernel body fails to free.
+# Separate binary because ASan cannot combine with the race harness's TSan.
+add_executable(kernel_leak_test kernel_registration_test.cpp)
+target_compile_options(kernel_leak_test PRIVATE -fsanitize=address -g -O1)
+target_link_options(kernel_leak_test PRIVATE -fsanitize=address)
+target_link_libraries(kernel_leak_test PRIVATE
+  ${ETNP_HARNESS_LIBS} "$<LINK_LIBRARY:WHOLE_ARCHIVE,etnp_kernels>")
