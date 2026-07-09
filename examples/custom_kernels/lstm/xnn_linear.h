@@ -24,7 +24,8 @@ class XnnLinear {
  public:
   static executorch::runtime::Result<XnnLinear> create(
       size_t in_ch, size_t out_ch,
-      const float* weight,          // [out_ch, in_ch]; not copied — must outlive the op
+      const float* weight,          // [out_ch, in_ch]; packed into the op at create(),
+                                    // pointer need not outlive this call
       const float* bias /*nullable*/) {
     xnn_operator_t op = nullptr;
     const xnn_status s = xnn_create_fully_connected_nc_f32(

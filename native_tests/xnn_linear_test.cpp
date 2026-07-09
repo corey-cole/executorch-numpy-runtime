@@ -1,5 +1,6 @@
 // Proves we can drive XNNPACK's f32 fully-connected operator directly (outside the
 // ExecuTorch delegate) and get input @ weight^T + bias. Oracle: a naive triple loop.
+#include <cmath>
 #include <cstdio>
 #include <vector>
 
