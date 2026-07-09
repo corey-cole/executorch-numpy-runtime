@@ -59,3 +59,9 @@ if(TARGET etnp_kernels)
   target_link_libraries(kernel_leak_test PRIVATE
     ${ETNP_HARNESS_LIBS} "$<LINK_LIBRARY:WHOLE_ARCHIVE,etnp_kernels>")
 endif()
+
+# XNNPACK-FC helper unit test (Task 1). Isolated: does NOT need etnp_kernels.
+add_executable(xnn_linear_test xnn_linear_test.cpp)
+target_include_directories(xnn_linear_test PRIVATE
+  ${CMAKE_SOURCE_DIR}/../examples/custom_kernels/lstm)
+target_link_libraries(xnn_linear_test PRIVATE ${ETNP_HARNESS_LIBS})
