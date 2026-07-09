@@ -8,7 +8,7 @@
 
 **Architecture:** The op computes the classic LSTM recurrence over `T` timesteps. The two learned projections (`input @ W_ih^T + b_ih`, `h @ W_hh^T + b_hh`) are delegated to XNNPACK's `xnn_*_fully_connected_nc_f32` operator — the *same* tuned kernels the XNNPACK delegate uses — created ONCE (weights are constant across the sequence) and run per timestep. The pointwise tail (four gate activations, `c' = f*c + i*g`, `h' = o*tanh(c')`, and the `g_ih + g_hh` add) is fused into a single pass per timestep, avoiding materializing intermediates. It rides the custom-kernel seam from PR #3: registered via `EXECUTORCH_LIBRARY`, compiled via `ETNP_EXTRA_KERNEL_SOURCES`, and covered by the whole-archive nm-guard.
 
-**Tech Stack:** C++17, CMake ≥3.24, the pinned ExecuTorch 1.3.1 runtime (`third_party/…`), XNNPACK's public C API (`xnnpack.h`, already shipped + linked), the custom-kernel seam (`cmake/Kernels.cmake`, `native_tests/`), and PyTorch (in the export venv) only to generate a committed golden fixture.
+**Tech Stack:** C++17, CMake ≥3.24, the pinned ExecuTorch 1.3.1 runtime (`third_party/…`), XNNPACK's public C API (`xnnpack.h`, already shipped + linked), the custom-kernel seam (`cmake/Kernels.cmake`, `native_tests/`), and PyTorch (in the export venv) to generate the committed golden fixture (Task 3) and, for the MVP probe (Tasks 4–6), to export the benchmark `.pte`s.
 
 ## Dependency
 
@@ -655,9 +655,17 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 
 ---
 
-### Task 4: Custom-op AOT export support (`etnp::lstm` for `torch.export`)
+## MVP Performance Probe (Tasks 4–6) — relaxed QC
 
-**Scope change:** this task deliberately reverses the earlier "export is out of scope" stance — the benchmark (Tasks 5–6) compares `.pte` artifacts, which requires producing a `.pte` that references `etnp::lstm.out`. This is the highest-uncertainty task; its export internals must be validated in the ExecuTorch export venv, so its steps give a concrete scaffold plus explicit venv-verification.
+> **Strategy:** per the [LSTM op delivery strategy](../specs/2026-07-09-lstm-op-delivery-strategy.md), the op's permanent home is the upstream relocatable-library tarball, and this repo will eventually just consume it. Tasks 4–6 are **not** that productionization — they are a throwaway **MVP** whose only deliverable is a *performance signal*: does the custom op beat naive decomposition on `.pte` size and execution latency, and can it emit a `.pte` the naive path can't?
+>
+> **Relaxed quality bar (explicit):** these tasks build throwaway tooling. Per-task review checks only that (a) it runs and (b) the reported numbers are *honest* — same weights and inputs on both sides, a correctness cross-check at rtol 1e-4, no cherry-picked config. It does NOT hold the export tooling, the bench scripts, or the injected-kernel bench build to permanent-change standards (no full dtype/shape matrix, no polish, no durable artifacts, no CI wiring). The correctness backing is the existing Task 1–3 tests. Anything that would need to be bulletproof to *ship* is deferred to **Deferred: upstream productionization** below.
+
+---
+
+### Task 4 (MVP): produce a `.pte` that references `etnp::lstm.out`
+
+The benchmark needs a `.pte` carrying the custom op, so register `etnp::lstm` for `torch.export` and confirm it survives lowering (not decomposed). This is throwaway export tooling: the eager reference impl only needs to be correct enough to trace and shape-propagate — it is **not** the shipping AOT definition (that lives upstream later, per the strategy doc). Highest-uncertainty step; validate in the ExecuTorch export venv.
 
 **Files:**
 - Create: `tools/etnp_lstm_op.py` — registers `etnp::lstm` with `torch.library` (schema + reference impl + fake/meta + out-variant) so `to_edge_transform_and_lower` keeps it as one opaque op.
@@ -743,9 +751,9 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 
 ---
 
-### Task 5: Dual-`.pte` size + execution-time benchmark
+### Task 5 (MVP): Dual-`.pte` size + execution-time benchmark
 
-Export the SAME logical LSTM two ways — naive decomposition vs our custom op — with identical weights, and compare `.pte` size and wall-clock over a sweep of (T, H, B).
+Export the SAME logical LSTM two ways — naive decomposition vs our custom op — with identical weights, and compare `.pte` size and wall-clock over a sweep of (T, H, B). This is the headline MVP number.
 
 **Files:**
 - Create: `tools/export_lstm_bench_models.py` — emits `lstm_naive_<cfg>.pte` and `lstm_custom_<cfg>.pte` pairs with shared weights; prints a size table.
@@ -771,9 +779,9 @@ python tools/export_lstm_bench_models.py /tmp/lstm_ptes
 python tools/bench_lstm.py /tmp/lstm_ptes
 ```
 
-- [ ] **Step 3: Write the timing harness and assert the win**
+- [ ] **Step 3: Write the timing harness and record the numbers**
 
-`tools/bench_lstm.py`: for each config, load `lstm_naive` and `lstm_custom`, warm up, time N runs on identical input, and print a table of `config | naive_size | custom_size | naive_ms | custom_ms | size_ratio | speedup`. Assert `custom_size < naive_size` for every config, and that both `size_ratio` and `speedup` **increase with T** (the structural claim). Correctness: assert `custom` and `naive` outputs agree at rtol 1e-4 on the same input (reuses Task 3's tolerance).
+`tools/bench_lstm.py`: for each config, load `lstm_naive` and `lstm_custom`, warm up, time N runs on identical input, and print a table of `config | naive_size | custom_size | naive_ms | custom_ms | size_ratio | speedup`. **The one hard gate (honesty, not polish):** the two paths must use identical weights and inputs, and `custom` vs `naive` outputs must agree at rtol 1e-4 (reuses Task 3's tolerance) — a benchmark comparing two different computations is worthless. Report the `size_ratio`/`speedup` trend vs T as observed; a config where custom does *not* win is a finding to surface, not a failed assertion (MVP: we're measuring, not proving). Do not tune configs to manufacture a win.
 
 Run:
 ```bash
@@ -792,9 +800,9 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 
 ---
 
-### Task 6: Feasibility crossover — a `.pte` only the custom op can produce
+### Task 6 (MVP): Feasibility crossover — a `.pte` only the custom op can produce
 
-Demonstrate the size/complexity wall of naive decomposition: sweep T upward until naive export fails or blows a declared practicality budget, while the custom export stays constant and succeeds.
+Demonstrate the size/complexity wall of naive decomposition: sweep T upward until naive export fails or blows a declared practicality budget, while the custom export stays constant and succeeds. This is the "impossible for naive" existence proof from the strategy doc — an artifact + a crossover `T*`, not a polished tool.
 
 **Files:**
 - Create: `tools/lstm_feasibility.py` — sweeps T, records naive export outcome (success / size / wall-time / failure) vs custom, and reports the crossover.
@@ -826,10 +834,19 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 
 ---
 
+## Deferred: upstream productionization (post-MVP)
+
+Not part of this plan's execution — captured here so the MVP boundary is explicit. Detailed in the [LSTM op delivery strategy](../specs/2026-07-09-lstm-op-delivery-strategy.md). Once the MVP confirms the win:
+
+- **Move the op upstream** into the relocatable-library project (`executorch-runtime-dist`): the runtime kernel (torch-free C++), a *shipping* AOT definition, and a **live** torch round-trip test (export → lower → run → compare to eager) — which supersedes Task 3's committed-golden workaround. Keep the `etnp::lstm.out` name; always-on in every variant.
+- **Adopt an upstream `extras` bundle convention** (kernel + op-name-as-single-source-of-truth + AOT def + mandatory round-trip test + `variants:` metadata); generalize the nm-guard into a per-op manifest check. LSTM is extra #1 / the template — build the convention, defer the framework until ops #2–3 exist.
+- **In this repo (the shim):** bump `cmake/RuntimePin.cmake` to the new tarball; keep the generic custom-kernel seam; **replace** the Task 1–3 native LSTM tests with a small torch-free *consumer smoke test* (load a committed `.pte` using `etnp::lstm.out`, run it, assert outputs). The `examples/custom_kernels/lstm/` sources can then retire or become a pointer to upstream.
+- **Optional, parallel, slow:** an ExecuTorch RFC-appetite issue (design-only, led with the MVP benchmark numbers). Watch the ExecuTorch **1.4.0** release (~2026-07-23) for a surprise LSTM/RNN improvement before investing.
+
 ## Self-review notes
 
 - **Spec coverage:** XNNPACK-FC helper + isolated proof (T1) · sequence-level `etnp::lstm` kernel with create-once/run-many projections + fused tail (T2) · registration via the seam + build-guard TU (T2) · analytic correctness without PyTorch (T2) · torch parity via committed golden (T3) · CI wiring (T3) · custom-op AOT export (T4) · dual-`.pte` size + latency benchmark vs naive decomposition (T5) · feasibility crossover / a `.pte` only the custom op can produce (T6). Constraints (example-not-bundled, single-layer/unidirectional/float32, PyTorch gate order, XNNPACK-not-BLAS, whole-archive, `if(TARGET etnp_kernels)`) each map to a task.
-- **Task grouping / scope check:** T1–T3 (the kernel + native validation) and T4–T6 (export + benchmark) are two loosely-coupled subsystems sharing one plan because T4–T6 depend on T2's kernel. T4–T6 could be split into a follow-on plan if T1–T3 land first. T4 reverses the project's prior "custom-op export out of scope" stance and carries the most risk; it gates T5–T6.
+- **Task grouping / scope check:** T1–T3 (the kernel + native validation) are DONE and are the permanent, reviewed correctness backing. T4–T6 are a **throwaway MVP performance probe under a relaxed quality bar** (see the banner above Task 4): their only deliverable is an honest size/latency signal + the "impossible-for-naive" existence proof, not shippable code. The real productionization — moving the op upstream, the `extras` mechanism, the shim's consumer smoke test — is **deferred** (see "Deferred: upstream productionization"). T4 is still the highest-risk step (custom-op export must survive lowering) and gates T5–T6.
 - **Benchmark honesty (must hold during T5–T6):** the naive path's gate matmuls may ALSO be XNNPACK-delegated, so the execution-time win comes from fewer dispatch boundaries + fused pointwise tail + create-once, not a faster GEMM — the sweep must vary T and H to show this. "Impossible" in T6 means *exceeds a declared practicality budget* (size/time/memory), demonstrated as a crossover T*, not a universal claim.
 - **Type consistency:** op name `etnp::lstm.out`, TU `_GLOBAL__sub_I_etnp_lstm.cpp`, kernel signature (arg order input,h0,c0,w_ih,w_hh,b_ih,b_hh,output,hn,cn), and the 10-EValue boxed arg order are identical across the kernel, both native tests, and the parity marshaling. `XnnLinear::create/run` and `ensure_xnn_initialized()` signatures match between the header, the Task-1 test, and the kernel.
 - **Known adjustment points (verify at implementation time):** (a) whether `xnn_linear_test`/the kernel need `XNNPACK` added explicitly to link libs or inherit it transitively via `xnnpack_backend` in `${ETNP_HARNESS_LIBS}`; (b) the `ET_KERNEL_CHECK` failure-return form for a 3-tuple `std::tie` return; (c) that `resize_tensor(output, {osz, 3})` selects the `SizesType` overload cleanly; (d) `make_tensor_ptr({...})` brace overloads for 1-D and 3-D shapes. Each surfaces at first compile and is local to fix.
