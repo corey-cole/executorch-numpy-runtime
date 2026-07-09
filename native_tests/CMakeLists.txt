@@ -58,6 +58,15 @@ if(TARGET etnp_kernels)
   target_link_options(kernel_leak_test PRIVATE -fsanitize=address)
   target_link_libraries(kernel_leak_test PRIVATE
     ${ETNP_HARNESS_LIBS} "$<LINK_LIBRARY:WHOLE_ARCHIVE,etnp_kernels>")
+
+  add_executable(lstm_kernel_test lstm_kernel_test.cpp)
+  target_link_libraries(lstm_kernel_test PRIVATE
+    ${ETNP_HARNESS_LIBS} "$<LINK_LIBRARY:WHOLE_ARCHIVE,etnp_kernels>")
+  add_custom_command(TARGET lstm_kernel_test POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -DSO=$<TARGET_FILE:lstm_kernel_test> -DNM=nm
+            "-DEXTRA_TUS=${ETNP_KERNEL_EXPECT_TUS}"
+            -P ${CMAKE_SOURCE_DIR}/../cmake/assert_kernels_registered.cmake
+    VERBATIM)
 endif()
 
 # XNNPACK-FC helper unit test (Task 1). Isolated: does NOT need etnp_kernels.
