@@ -80,15 +80,14 @@ is opaque, so weights are baked once), while the naive path unrolls per timestep
 so the size advantage widens sharply with `T` (2.8x at `T=16` up to 27x at `T=256`
 for `H=32`), and holds at every `H`.
 
-Latency, by contrast, depends on hidden size `H`. The custom kernel runs the gate
-projections one timestep at a time, so it only beats the naive path — whose matmuls
-XNNPACK batches across timesteps — at **narrow `H`**. Observed (`B=1`): custom wins
-on speed at `H=32` (1.3x–1.9x, widening with `T`), is marginally *slower* at `H=64`
-(~0.87–0.92x), and clearly slower at `H=128` (0.49x–0.85x). The speed crossover thus
-sits between `H=32` and `H=64`. Takeaway: reach for the custom op for **narrow-`H`,
-long-`T`** LSTMs (it wins on both size and speed there); at wide `H`, keep it only
-when `.pte` size — or export feasibility (below) — is the binding constraint, since
-it still wins on size but costs latency.
+Latency, by contrast, depends on hidden size `H`. **Before the 2026-07 restructure** the
+custom kernel ran the gate projections one timestep at a time and — because XNNPACK batches
+the naive path's matmuls across timesteps — only beat naive at narrow `H` (winning at `H=32`,
+losing at `H>=64`). The restructure described below (one batched input projection on the shared
+threadpool + cached packed FC operators + a Highway-SIMD fused cell update) closed that gap: the
+custom op now wins on **both** size and speed at every benchmarked `(T, H)` on the reference
+host — see the post-restructure table in `problem-statement.md`. The size and export-feasibility
+advantages (below) are largest at long `T`.
 
 ### LSTM kernel internals (post 2026-07 restructure)
 

@@ -18,6 +18,8 @@ Taken together these result seem contradictory.
 Summary below captures on local host with 4 core/8 thread CPU (11th Gen Intel(R) Core(TM) i7-1185G7 @ 3.00GHz)
 
 
+> NOTE: the speed figures in this section are the PRE-restructure baseline. They were superseded by the "Post-restructure results (2026-07-10)" section below, where the custom op wins on speed at every benchmarked config. Kept for historical context.
+
 Calibrated to the MVP (single-layer, unidirectional, batch_first=False, f32, B=1):
   SIZE   custom .pte constant in T; naive grows with T.
   SPEED  custom wins at H=32 (1.3x–1.9x, widening with T); marginally LOSES at H=64
@@ -140,7 +142,7 @@ size win (27× smaller at T256, constant in T) and export-feasibility win
 The local i7-1185G7 thermal-throttles under sustained load: absolute ms are
 NOT comparable across bench runs, only ratios within a single run.
 
-## Post-restructure results (2026-07-XX)
+## Post-restructure results (2026-07-10)
 
 Kernel restructured per docs/superpowers/specs/2026-07-10-lstm-kernel-restructure-design.md
 (batched input projection on the shared threadpool + Highway SIMD cell update
