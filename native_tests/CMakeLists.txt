@@ -71,6 +71,14 @@ if(TARGET etnp_kernels)
   add_executable(lstm_parity_test lstm_parity_test.cpp)
   target_link_libraries(lstm_parity_test PRIVATE
     ${ETNP_HARNESS_LIBS} "$<LINK_LIBRARY:WHOLE_ARCHIVE,etnp_kernels>")
+
+  # TSan gate for the op cache: shared XnnLinearCache entries hammered from
+  # two threads. Separate binary: TSan cannot combine with the ASan targets.
+  add_executable(lstm_cache_race_test lstm_cache_race_test.cpp)
+  target_compile_options(lstm_cache_race_test PRIVATE -fsanitize=thread -g -O1)
+  target_link_options(lstm_cache_race_test PRIVATE -fsanitize=thread)
+  target_link_libraries(lstm_cache_race_test PRIVATE
+    ${ETNP_HARNESS_LIBS} "$<LINK_LIBRARY:WHOLE_ARCHIVE,etnp_kernels>" Threads::Threads)
 endif()
 
 # XNNPACK-FC helper unit test (Task 1). Isolated: does NOT need etnp_kernels.
