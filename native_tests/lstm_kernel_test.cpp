@@ -55,7 +55,9 @@ int main() {
   EValue* args[] = {&ev[0], &ev[1], &ev[2], &ev[3], &ev[4],
                     &ev[5], &ev[6], &ev[7], &ev[8], &ev[9]};
   // The kernel allocates scratch via ctx.allocate_temp, so supply a temp allocator.
-  std::vector<uint8_t> temp_buf(64 * 1024);
+  // The restructured kernel allocates T*B*4H floats for the batched input
+  // projection; size the arena generously so shape bumps don't hit the wall.
+  std::vector<uint8_t> temp_buf(4 * 1024 * 1024);
   MemoryAllocator temp_alloc(
       static_cast<uint32_t>(temp_buf.size()), temp_buf.data());
   KernelRuntimeContext ctx(/*event_tracer=*/nullptr, &temp_alloc);

@@ -29,7 +29,10 @@ if(_etnp_kernel_sources)
   set_property(TARGET etnp_kernels PROPERTY POSITION_INDEPENDENT_CODE ON)
   # PUBLIC so consumers of etnp_kernels inherit ExecuTorch's include dirs; the
   # core lib carries the kernel-registration API headers.
-  target_link_libraries(etnp_kernels PUBLIC executorch)
+  # extension_threadpool: kernels may use the shared runtime threadpool
+  # (executorch::extension::threadpool::get_pthreadpool), e.g. the LSTM
+  # example's batched input projection.
+  target_link_libraries(etnp_kernels PUBLIC executorch extension_threadpool)
 
   if(ETNP_KERNELS_USE_HIGHWAY)
     # Hash-pinned like RuntimePin.cmake: the SHA256 change is the supply-chain

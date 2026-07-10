@@ -63,7 +63,9 @@ int main() {
   for (int i = 0; i < 10; ++i) args[i] = &ev[i];
   // Kernel allocates gate scratch via ctx.allocate_temp — supply a temp allocator
   // (same wiring as lstm_kernel_test.cpp; a bare KernelRuntimeContext fails at run).
-  std::vector<uint8_t> temp_buf(64 * 1024);
+  // The restructured kernel allocates T*B*4H floats for the batched input
+  // projection; size the arena generously so shape bumps don't hit the wall.
+  std::vector<uint8_t> temp_buf(4 * 1024 * 1024);
   MemoryAllocator temp_alloc(static_cast<uint32_t>(temp_buf.size()), temp_buf.data());
   KernelRuntimeContext ctx(/*event_tracer=*/nullptr, &temp_alloc);
   fn(ctx, Span<EValue*>(args, 10));
