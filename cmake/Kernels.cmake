@@ -12,6 +12,9 @@ set(ETNP_EXTRA_KERNEL_SOURCES "" CACHE STRING
   "Semicolon-separated absolute paths to additional custom-kernel .cpp/.cc \
 sources (registrar-bearing kernels and their aux sources) to \
 compile and register into the module (see docs/custom-kernels.md)")
+option(ETNP_KERNELS_USE_HIGHWAY
+  "FetchContent google/highway (hash-pinned) and link it into etnp_kernels. \
+Needed by kernels using Highway SIMD, e.g. the LSTM example's lstm_cell.cc." OFF)
 
 set(_etnp_kernel_sources "")
 if(ETNP_BUILD_REFERENCE_KERNEL)
@@ -27,6 +30,23 @@ if(_etnp_kernel_sources)
   # PUBLIC so consumers of etnp_kernels inherit ExecuTorch's include dirs; the
   # core lib carries the kernel-registration API headers.
   target_link_libraries(etnp_kernels PUBLIC executorch)
+
+  if(ETNP_KERNELS_USE_HIGHWAY)
+    # Hash-pinned like RuntimePin.cmake: the SHA256 change is the supply-chain
+    # review gate on bumps. contrib/ math is header-only, so no contrib libs.
+    # PIC is inherited from the including project's CMAKE_POSITION_INDEPENDENT_CODE.
+    set(HWY_ENABLE_CONTRIB OFF CACHE BOOL "" FORCE)
+    set(HWY_ENABLE_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(HWY_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+    set(HWY_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
+    set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+    include(FetchContent)
+    FetchContent_Declare(highway
+      URL "https://github.com/google/highway/archive/refs/tags/1.4.0.tar.gz"
+      URL_HASH "SHA256=e72241ac9524bb653ae52ced768b508045d4438726a303f10181a38f764a453c")
+    FetchContent_MakeAvailable(highway)
+    target_link_libraries(etnp_kernels PRIVATE hwy)
+  endif()
 
   foreach(_src IN LISTS _etnp_kernel_sources)
     # Only sources that register a kernel have a static-init registrar TU the
