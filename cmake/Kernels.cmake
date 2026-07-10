@@ -9,7 +9,8 @@
 option(ETNP_BUILD_REFERENCE_KERNEL
   "Compile the bundled reference custom kernel (etnp::triple.out)" ON)
 set(ETNP_EXTRA_KERNEL_SOURCES "" CACHE STRING
-  "Semicolon-separated absolute paths to additional custom-kernel .cpp sources to \
+  "Semicolon-separated absolute paths to additional custom-kernel .cpp/.cc \
+sources (registrar-bearing kernels and their aux sources) to \
 compile and register into the module (see docs/custom-kernels.md)")
 
 set(_etnp_kernel_sources "")
@@ -28,7 +29,24 @@ if(_etnp_kernel_sources)
   target_link_libraries(etnp_kernels PUBLIC executorch)
 
   foreach(_src IN LISTS _etnp_kernel_sources)
+    # Only sources that register a kernel have a static-init registrar TU the
+    # nm-guard must find. Aux sources (e.g. SIMD helpers like the LSTM
+    # example's lstm_cell.cc) have none — expecting one would false-fail the
+    # guard. Detection is configure-time content sniffing for either
+    # registration idiom (direct register_kernel() or the EXECUTORCH_LIBRARY()
+    # macro); re-run cmake if a source gains/loses its registration.
+    file(READ "${_src}" _src_text)
+    string(FIND "${_src_text}" "register_kernel(" _reg_pos)
+    string(FIND "${_src_text}" "EXECUTORCH_LIBRARY(" _macro_pos)
     get_filename_component(_base "${_src}" NAME)
-    list(APPEND ETNP_KERNEL_EXPECT_TUS "_GLOBAL__sub_I_${_base}")
+    if(NOT _reg_pos EQUAL -1 OR NOT _macro_pos EQUAL -1)
+      list(APPEND ETNP_KERNEL_EXPECT_TUS "_GLOBAL__sub_I_${_base}")
+    endif()
+    # Each source's own directory is an include dir: lets sources include
+    # sibling headers by bare name, and lets Highway's foreach_target
+    # re-include a source via its bare filename (see lstm_cell.cc).
+    get_filename_component(_dir "${_src}" DIRECTORY)
+    target_include_directories(etnp_kernels PRIVATE "${_dir}")
   endforeach()
+  message(STATUS "etnp_kernels: expecting registrar TUs: [${ETNP_KERNEL_EXPECT_TUS}]")
 endif()
