@@ -79,6 +79,11 @@ target_include_directories(xnn_linear_test PRIVATE
   ${CMAKE_SOURCE_DIR}/../examples/custom_kernels/lstm)
 target_link_libraries(xnn_linear_test PRIVATE ${ETNP_HARNESS_LIBS})
 
+add_executable(xnn_linear_cache_test xnn_linear_cache_test.cpp)
+target_include_directories(xnn_linear_cache_test PRIVATE
+  ${CMAKE_SOURCE_DIR}/../examples/custom_kernels/lstm)
+target_link_libraries(xnn_linear_cache_test PRIVATE ${ETNP_HARNESS_LIBS})
+
 # Highway fused cell-update unit test. Only meaningful when the LSTM example's
 # lstm_cell.cc is among the injected kernel sources (direct link-time call).
 if("${ETNP_EXTRA_KERNEL_SOURCES}" MATCHES "lstm_cell\\.cc")
