@@ -12,6 +12,16 @@ All referenced paths are absolute and live in the MVP repo on this machine:
 
 Both repos are local, so you can read `$SRC/...` directly from the `executorch-runtime-dist` checkout. **Port/adapt from these files; do not re-derive.** The MVP already paid down the hard parts — your job is to move a *correctness-stable, benchmark-validated* op into its permanent home, not to rewrite it.
 
+**Reference grounding (read before trusting any `$SRC/…:line`).** Every `$SRC/…:line`
+reference in this document is valid at commit **`95a5efd`**
+(`95a5efd1e596ee454dfe5581345fb14c7aa0767c`) on branch
+**`feature/lstm-sequence-kernel`**. Line numbers drift, and the LSTM example files
+(`examples/custom_kernels/lstm/*`, `native_tests/lstm_*`) live **only on that branch — they
+are not on `main`**. Resolve any reference authoritatively with
+`git -C $SRC show 95a5efd:<path>` (optionally `| sed -n 'A,Bp'`). If you have that branch
+checked out, `$SRC/<path>` works directly; from any other branch (including `main`), use the
+`git show` form. **Last updated:** 2026-07-10 (reflects the post-restructure state).
+
 ## Objective / definition of done
 
 Ship `etnp::lstm.out` in the relocatable ExecuTorch library so that every consumer of the tarball (including the numpy runtime) gets it registered at load time, **and** provide the AOT definition + a live torch round-trip test that proves export→lower→run matches `torch.nn.LSTM`. Concretely:
@@ -46,8 +56,8 @@ The canonical schema (keep byte-identical across faces):
 These are the traps the MVP already hit and solved. Each cites the file that demonstrates it.
 
 **A. The 3-output kernel CANNOT use `EXECUTORCH_LIBRARY`.**
-`$SRC/examples/custom_kernels/lstm/etnp_lstm.cpp:129-130` registers via a hand-rolled boxed trampoline:
-`register_kernel(Kernel("etnp::lstm.out", lstm_boxed))` where `lstm_boxed(KernelRuntimeContext&, Span<EValue*>)` unpacks the 10-slot stack. **Why:** in the pinned 1.3.1 runtime, `extension/kernel_util/make_boxed_from_unboxed_functor.h` has `static_assert(num_nonconst_tensors == 1)`, so the auto-unboxing macro rejects our three mutable outputs (`output, hn, cn`). **⚠️ Re-verify in YOUR ExecuTorch version** — you build the runtime, so you may be on a different version. If your `make_boxed` still caps at 1 output, keep the boxed registrar. If a newer version lifts the cap, you *may* use the macro, but the boxed path is known-good and version-robust — prefer it unless you have a reason.
+`$SRC/examples/custom_kernels/lstm/etnp_lstm.cpp:145-146` (at `95a5efd`) registers via a hand-rolled boxed trampoline:
+`register_kernel(Kernel("etnp::lstm.out", lstm_boxed))` where `lstm_boxed(KernelRuntimeContext&, Span<EValue*>)` (defined just above at `:133`) unpacks the 10-slot stack. **Why:** in the pinned 1.3.1 runtime, `extension/kernel_util/make_boxed_from_unboxed_functor.h` has `static_assert(num_nonconst_tensors == 1)`, so the auto-unboxing macro rejects our three mutable outputs (`output, hn, cn`). **⚠️ Re-verify in YOUR ExecuTorch version** — you build the runtime, so you may be on a different version. If your `make_boxed` still caps at 1 output, keep the boxed registrar. If a newer version lifts the cap, you *may* use the macro, but the boxed path is known-good and version-robust — prefer it unless you have a reason.
 
 **B. Projections reuse XNNPACK's public FC API, not BLAS — restructured 2026-07-10.**
 `$SRC/examples/custom_kernels/lstm/xnn_linear.h` wraps
@@ -65,7 +75,7 @@ SHA256 e72241ac9524bb653ae52ced768b508045d4438726a303f10181a38f764a453c).
 **C. The AOT "survives lowering" recipe.**
 `$SRC/tools/etnp_lstm_op.py` (docstring + `_lib.define` for BOTH `lstm` and `lstm.out`). **Why it works:** register both the functional and the `.out` overload as `CompositeExplicitAutograd` + a `register_fake`; `to_edge_transform_and_lower` **without** a partitioner keeps the op opaque, and ExecuTorch's `ToOutVarPass` (run inside `.to_executorch()`) converts it to `etnp::lstm.out` automatically — no partitioner, no non-decomposable hackery needed. This was verified: the lowered `.pte` contained exactly `['etnp::lstm.out']`.
 
-**D. The kernel uses `ctx.allocate_temp`.** Any test/harness that invokes the kernel directly must construct `KernelRuntimeContext` **with a temp allocator** (a bare context throws "No temp allocator provided"). See `$SRC/native_tests/lstm_kernel_test.cpp` (a 64 KiB `MemoryAllocator` is wired in).
+**D. The kernel uses `ctx.allocate_temp`.** Any test/harness that invokes the kernel directly must construct `KernelRuntimeContext` **with a temp allocator** (a bare context throws "No temp allocator provided"). See `$SRC/native_tests/lstm_kernel_test.cpp:60` (at `95a5efd`) — a **4 MiB** `MemoryAllocator` is wired in. The restructure enlarged this from 64 KiB because the batched input projection now allocates a `T*B*4H` float scratch buffer (the whole-sequence gate pre-activations) via `ctx.allocate_temp`; size the upstream test's arena for the largest `(T,B,H)` you exercise.
 
 **E. Naive export needs `flatc` on `PATH`.** The XNNPACK-partitioner lowering path shells out to `flatc`; run exports with the venv's `bin/` on `PATH`. (Only relevant if you reproduce the benchmark; the custom-op export path doesn't need it.)
 
@@ -85,17 +95,35 @@ Instead of `gen_lstm_golden.py` → committed `lstm_golden.h` → `lstm_parity_t
 
 ## Evidence this op is worth shipping (and what to document)
 
-From the MVP benchmark (`$SRC/docs/custom-kernels.md`, and `$SRC/tools/{export_lstm_bench_models,bench_lstm,lstm_feasibility}.py`; static advisor in `$SRC/tools/lstm_advisor.py`):
+From the benchmark (`$SRC/docs/custom-kernels.md`, `$SRC/problem-statement.md` — section
+"Post-restructure results (2026-07-10)", and
+`$SRC/tools/{export_lstm_bench_models,bench_lstm,lstm_feasibility}.py`; static advisor in
+`$SRC/tools/lstm_advisor.py`). **All figures below are the post-2026-07-10 restructure state**
+(batched input projection on the shared threadpool + packed-FC cache + Highway SIMD fused cell
+update); the pre-restructure narrow-H-only verdict is superseded and noted at the end.
 
-- **Size:** custom `.pte` is **constant in T**; naive decomposition grows with T. Win at every H, widening with T (2.8×→27× over T=16→256 at H=32).
-- **Speed:** custom **wins at narrow H** (H=32: 1.3×–1.9×, widening with T), is **marginally slower at H=64** (~0.87–0.92×) and clearly slower at H=128 (0.49×–0.85×). Crossover is between H=32 and H=64.
-- **Speed (post-restructure 2026-07):** superseded — see the post-restructure
-  table in `$SRC/problem-statement.md`; the custom op now wins at every
-  benchmarked (T,H) on the reference host, so the "reach for it at narrow-H
-  only" guidance below is obsolete for latency (size/feasibility wins unchanged).
-- **Feasibility:** naive export of **T=256, H=128** never completes within a 120 s budget; custom is trivial and constant. That's the "impossible-for-naive" existence proof.
+- **Size:** custom `.pte` is **constant in T**; the naive decomposition grows with T. Win at
+  every H, widening with T (2.8×→27× over T=16→256 at H=32). Unchanged by the restructure.
+- **Speed:** the custom op now **wins at every benchmarked (T, H)** on the reference host —
+  **1.66×–9.78×** across H ∈ {32, 64, 128}, T ∈ {16, 64, 256} — with the rtol/atol 1e-4
+  honesty cross-check passing (max|diff| ≈ 1.5e-7). See the "Post-restructure results
+  (2026-07-10)" table in `$SRC/problem-statement.md`.
+- **Feasibility:** naive export of **T=256, H=128** never completes within a 120 s budget;
+  custom is trivial and constant. The "impossible-for-naive" existence proof.
 
-Document this envelope in the op's upstream docs so consumers know: **reach for it at narrow-H / long-T** (wins both size and speed), and at wide H keep it only when `.pte` size or export feasibility is the binding constraint (size-only win, latency cost).
+Document this envelope in the op's upstream docs: **the custom op is the default choice** for
+the supported LSTM shape — it wins on `.pte` size at every config, wins on speed at every
+benchmarked config, and exports shapes the naive path cannot complete. The size and
+feasibility advantages are largest at long T.
+
+> **Historical (pre-restructure — superseded, do not propagate):** the first sequence-only
+> implementation (per-timestep FC + a scalar sigmoid/tanh gate tail) won on speed only at
+> narrow H (H=32: 1.3×–1.9×), was marginally slower at H=64 (~0.87–0.92×), and clearly slower
+> at H=128 (0.49×–0.85×) — root cause was the scalar element-wise gate math dominating once H
+> widened. The 2026-07-10 restructure added a Highway-SIMD fused cell update
+> (`lstm_cell.{h,cc}`) plus the batched projection and packed-FC cache, which flipped every
+> H≥64 config. If you find "reach for it at narrow-H only" guidance in any older doc, it
+> predates the restructure.
 
 ## Unknowns to resolve in the `executorch-runtime-dist` repo
 
@@ -109,7 +137,7 @@ Document this envelope in the op's upstream docs so consumers know: **reach for 
 - Do not rename the op or change the schema (`.pte` permanence — strategy Decision 4 / Decision 1).
 - Do not widen scope to multi-layer/bidirectional/dtypes/packed sequences (that's the "bulletproof full nn.LSTM" explicitly cut).
 - Do not build a plugin framework yet — LSTM is extra #1; formalize a manifest/codegen only after ops #2–3 exist.
-- Do not port the throwaway MVP bench/feasibility tooling as production code — it's *evidence*, not a deliverable. The advisor (`lstm_advisor.py`) is optional and can travel separately.
+- Do not port the throwaway MVP bench/feasibility tooling as production code — it's *evidence*, not a deliverable. The advisor (`lstm_advisor.py`) is optional and can travel separately; note its speed heuristics are the **pre-restructure** calibration ("slower at H≥64") and are stale — retune or drop them before any reuse.
 - Do not reintroduce a torch dependency into the numpy runtime repo — the numpy repo's follow-up (pin bump + torch-free consumer smoke test) is strategy Decision 2 and is **out of scope for this handoff**.
 
 ## Follow-up in the numpy runtime repo (not your job, for context)
