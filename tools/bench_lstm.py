@@ -28,9 +28,11 @@ CONFIGS = [
     (16, 32, 1),
     (64, 32, 1),
     (256, 32, 1),
+    (16, 64, 1),
+    (64, 64, 1),
     (16, 128, 1),
     (64, 128, 1),
-    (256, 128, 1),
+    (256, 128, 1),  # naive .pte infeasible to export (feasibility wall) — skipped if absent.
 ]
 
 WARMUP = 5
