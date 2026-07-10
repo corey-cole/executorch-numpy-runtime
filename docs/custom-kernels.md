@@ -61,8 +61,9 @@ wheel with the kernel injected, then run the harness in a throwaway venv:
     #    Run from the repo root so `tools` resolves as a package.
     /path/to/export-venv/bin/python tools/export_lstm_bench_models.py /tmp/lstm_ptes
 
-    # 2. Build a wheel WITH the LSTM kernel compiled in.
-    CMAKE_ARGS="-DETNP_EXTRA_KERNEL_SOURCES=$PWD/examples/custom_kernels/lstm/etnp_lstm.cpp" \
+    # 2. Build a wheel WITH the LSTM kernel compiled in. The kernel is two
+    #    sources (op + Highway SIMD cell update) and needs the pinned Highway dep.
+    CMAKE_ARGS="-DETNP_EXTRA_KERNEL_SOURCES=$PWD/examples/custom_kernels/lstm/etnp_lstm.cpp;$PWD/examples/custom_kernels/lstm/lstm_cell.cc -DETNP_KERNELS_USE_HIGHWAY=ON" \
       uv build --wheel -o /tmp/lstm_bench_wheel
 
     # 3. Install it into a fresh torch-free venv and run the bench.
@@ -76,7 +77,30 @@ computations is worthless), then prints a
 `config | naive_size | custom_size | naive_ms | custom_ms | size_ratio | speedup`
 table. The custom op's `.pte` size is independent of sequence length `T` (the op
 is opaque, so weights are baked once), while the naive path unrolls per timestep —
-so the size advantage widens sharply with `T`.
+so the size advantage widens sharply with `T` (2.8x at `T=16` up to 27x at `T=256`
+for `H=32`), and holds at every `H`.
+
+Latency, by contrast, depends on hidden size `H`. The custom kernel runs the gate
+projections one timestep at a time, so it only beats the naive path — whose matmuls
+XNNPACK batches across timesteps — at **narrow `H`**. Observed (`B=1`): custom wins
+on speed at `H=32` (1.3x–1.9x, widening with `T`), is marginally *slower* at `H=64`
+(~0.87–0.92x), and clearly slower at `H=128` (0.49x–0.85x). The speed crossover thus
+sits between `H=32` and `H=64`. Takeaway: reach for the custom op for **narrow-`H`,
+long-`T`** LSTMs (it wins on both size and speed there); at wide `H`, keep it only
+when `.pte` size — or export feasibility (below) — is the binding constraint, since
+it still wins on size but costs latency.
+
+### LSTM kernel internals (post 2026-07 restructure)
+
+The op computes the input projection for ALL timesteps as one batched XNNPACK
+FC on the shared runtime threadpool (`extension_threadpool` — the same pool
+the XNNPACK delegate uses), keeps packed FC operators in a process-wide
+fingerprint-verified LRU cache (`xnn_linear_cache.h`) so weights are packed
+once per weight set instead of once per execute, and fuses the per-timestep
+gate/cell/hidden update into a Highway-SIMD pass with runtime dynamic dispatch
+(`lstm_cell.cc`; Highway is FetchContent-pinned in `cmake/Kernels.cmake`
+behind `-DETNP_KERNELS_USE_HIGHWAY=ON`). Design + evidence:
+`docs/superpowers/specs/2026-07-10-lstm-kernel-restructure-design.md`.
 
 ### Feasibility crossover (Task 6)
 

@@ -139,3 +139,27 @@ size win (27× smaller at T256, constant in T) and export-feasibility win
 
 The local i7-1185G7 thermal-throttles under sustained load: absolute ms are
 NOT comparable across bench runs, only ratios within a single run.
+
+## Post-restructure results (2026-07-XX)
+
+Kernel restructured per docs/superpowers/specs/2026-07-10-lstm-kernel-restructure-design.md
+(batched input projection on the shared threadpool + Highway SIMD cell update
++ cached packed FC operators). Same host, same fixtures:
+
+```
+config         naive_size custom_size  naive_ms custom_ms size_ratio  speedup
+-----------------------------------------------------------------------------
+T16_H32_B1          98432       35712     0.061     0.015      2.76x   3.96x (max|diff|=1.19e-07)
+T64_H32_B1         273536       35712     0.226     0.036      7.66x   6.24x (max|diff|=1.19e-07)
+T256_H32_B1        973568       35712     0.968     0.099     27.26x   9.78x (max|diff|=1.19e-07)
+T16_H64_B1         197760      135040     0.071     0.027      1.46x   2.61x (max|diff|=1.49e-07)
+T64_H64_B1         372864      135040     0.260     0.071      2.76x   3.68x (max|diff|=1.19e-07)
+T16_H128_B1        593024      530304     0.099     0.060      1.12x   1.66x (max|diff|=1.49e-07)
+T64_H128_B1        768128      530304     0.741     0.182      1.45x   4.07x (max|diff|=1.49e-07)
+T256_H128_B1   (missing .pte pair -- skipped)
+
+rtol 0.0001 cross-check over 7 config(s): max abs diff = 1.490e-07 (PASS)
+Custom won on both size and speed for every config checked.
+```
+
+All configs now >= 1.0x with the rtol 1e-4 cross-check passing.
