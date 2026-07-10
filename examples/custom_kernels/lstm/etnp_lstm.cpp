@@ -96,6 +96,17 @@ std::tuple<Tensor&, Tensor&, Tensor&> lstm_out(
   // Input projection for ALL timesteps in one GEMM: input [T,B,I] is
   // contiguous, hence also a valid [T*B, I] matrix. This is the only
   // multi-threaded step — same pool the XNNPACK delegate uses.
+  //
+  // CONCURRENCY: get_pthreadpool() is a process-wide SINGLETON, and XNNPACK
+  // drives it on the raw pthreadpool_t path — which does NOT go through
+  // ThreadPool::run()'s serialization mutex. Within one Runtime this is safe
+  // (executes are serialized by the per-Runtime mutex, and this projection
+  // completes before the timestep loop). Across Runtimes running truly in
+  // parallel, two executes reaching this call drive the one pool concurrently
+  // — the SAME caveat XNNPACK-delegated models already carry. If you need
+  // parallel Runtimes that both use pool-backed ops, serialize their executes
+  // (or accept ExecuTorch's shared-pool contract). See
+  // native_tests/lstm_cache_race_test.cpp (Phase B) for the topology.
   ET_KERNEL_CHECK(ctx,
       run_cached(*ent_ih, static_cast<size_t>(T) * B, in, g_ih_all,
                  executorch::extension::threadpool::get_pthreadpool()) ==
