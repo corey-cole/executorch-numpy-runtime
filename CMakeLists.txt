@@ -7,6 +7,9 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 include(cmake/RuntimePin.cmake)
 list(APPEND CMAKE_PREFIX_PATH "${ETNP_RUNTIME_PREFIX}")
 find_package(ExecuTorch CONFIG REQUIRED)
+if(EXISTS "${ETNP_RUNTIME_PREFIX}/lib/cmake/ETNPExtras/ETNPExtras.cmake")
+  include("${ETNP_RUNTIME_PREFIX}/lib/cmake/ETNPExtras/ETNPExtras.cmake")
+endif()
 include(cmake/Kernels.cmake)
 
 # nanobind via scikit-build-core-provided Python
@@ -33,6 +36,10 @@ target_link_libraries(_core PRIVATE
 
 if(TARGET etnp_kernels)
   target_link_libraries(_core PRIVATE "$<LINK_LIBRARY:WHOLE_ARCHIVE,etnp_kernels>")
+endif()
+
+if(COMMAND etnp_extras_whole_archive)
+  etnp_extras_whole_archive(_core)
 endif()
 
 target_compile_definitions(_core PRIVATE ETNP_ET_VERSION="${ETNP_ET_VERSION}")

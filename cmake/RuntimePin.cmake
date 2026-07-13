@@ -13,7 +13,7 @@
 # before/without invoking CMake; a CMake ${VAR} template would scrape as literal "${...}" text
 # and break that. Keep literals and version vars in sync by hand when bumping.
 set(ETNP_ET_VERSION "1.3.1" CACHE STRING "Pinned ExecuTorch version")
-set(ETNP_RUNTIME_VERSION "1.3.1-3" CACHE STRING "Pinned executorch-runtime-dist package revision")
+set(ETNP_RUNTIME_VERSION "1.3.1-4" CACHE STRING "Pinned executorch-runtime-dist package revision")
 set(ETNP_RUNTIME_VARIANT "logging" CACHE STRING "Runtime variant: logging (only variant this project ships)")
 # Derive the runtime platform slug from the build's target architecture so the correct
 # per-arch pin row (below) is chosen automatically on both x86_64 and aarch64 CI runners.
@@ -34,12 +34,12 @@ if(NOT _ETNP_PLATFORM)
 endif()
 
 set(ETNP_RUNTIME_URL_logging_linux-x86_64
-  "https://github.com/measly-java-learning/executorch-runtime-dist/releases/download/v1.3.1-3/executorch-runtime-1.3.1-logging-linux-x86_64.tar.gz")
-set(ETNP_RUNTIME_SHA256_logging_linux-x86_64 "4aa01c8056fbf38092e968430e287cc58996ddefb41dc32794cd7278e863b6da")
+  "https://github.com/measly-java-learning/executorch-runtime-dist/releases/download/v1.3.1-4/executorch-runtime-1.3.1-logging-linux-x86_64.tar.gz")
+set(ETNP_RUNTIME_SHA256_logging_linux-x86_64 "49232e94eb15b212181a75adf1b93a86f6f9d211ead1f03b4d56838966c5350d")
 
 set(ETNP_RUNTIME_URL_logging_linux-aarch64
-  "https://github.com/measly-java-learning/executorch-runtime-dist/releases/download/v1.3.1-3/executorch-runtime-1.3.1-logging-linux-aarch64.tar.gz")
-set(ETNP_RUNTIME_SHA256_logging_linux-aarch64 "7e9ac585a3f99cef78b99f0019cdca8c444d89d133cceb99cd464afb5572c3c5")
+  "https://github.com/measly-java-learning/executorch-runtime-dist/releases/download/v1.3.1-4/executorch-runtime-1.3.1-logging-linux-aarch64.tar.gz")
+set(ETNP_RUNTIME_SHA256_logging_linux-aarch64 "cf69c07faa2afccf0e8cfb9a312490d120a98e352064ce18f0d189affd91055f")
 
 # Resolve relative to this file's location (repo-root/cmake/), not the including project's
 # CMAKE_SOURCE_DIR, so both the top-level build and native_tests' standalone
