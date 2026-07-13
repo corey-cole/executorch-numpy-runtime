@@ -1,0 +1,4 @@
+LSTM_T=5
+LSTM_B=2
+LSTM_I=4
+LSTM_H=3
