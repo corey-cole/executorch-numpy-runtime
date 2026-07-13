@@ -287,3 +287,6 @@ wheelhouse/
 CMakeCache.txt
 CMakeFiles/
 
+
+# Local worktrees created by EnterWorktree
+/.claude/worktrees/
