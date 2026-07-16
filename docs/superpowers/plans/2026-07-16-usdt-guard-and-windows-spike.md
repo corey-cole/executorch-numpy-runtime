@@ -314,9 +314,12 @@ Expected: 6 passed.
 
 - [ ] **Step 5: Verify against a real linked .so (not just canned text)**
 
-Run:
+Resolve the `.so` **through Python**, never by globbing the source tree — a stale build
+artifact can sit in `executorch_numpy_runtime/` for weeks and silently shadow the real one:
+
 ```bash
-bash scripts/check-usdt-notes.sh --expect on executorch_numpy_runtime/_core*.so
+REAL=$(.venv/bin/python -c "import executorch_numpy_runtime._core as c; print(c.__file__)")
+bash scripts/check-usdt-notes.sh --expect on "$REAL"
 ```
 Expected:
 ```
@@ -431,7 +434,10 @@ If it instead prints `USDT guard disarmed`, Task 1 did not land — the pin is n
 A guard never seen failing is not a guard. Strip a copy and confirm it is caught:
 
 ```bash
-cp executorch_numpy_runtime/_core*.so /tmp/probe-test.so
+# Resolve through Python, never by globbing the source tree: a stale build artifact can
+# sit in executorch_numpy_runtime/ for weeks and silently shadow the real module.
+REAL=$(.venv/bin/python -c "import executorch_numpy_runtime._core as c; print(c.__file__)")
+cp "$REAL" /tmp/probe-test.so
 strip --remove-section=.note.stapsdt /tmp/probe-test.so
 cmake -DSO=/tmp/probe-test.so \
       -DPREFIX="$(dirname build/*/_deps/etnp_runtime-src/BUILDINFO)" \
