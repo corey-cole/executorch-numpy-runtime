@@ -65,7 +65,6 @@ Three layers, bottom-up:
 ## Build-time guards (these fail the *build*, not runtime)
 
 - **`cmake/assert_kernels_registered.cmake`** (POST_BUILD `nm` guard): fails the build if the XNNPACK/quantized/optimized kernel-registration static-init TUs were garbage-collected out of the `.so`. This is why the module is built `NOSTRIP` — a stripped symbol table would make the guard blind. Otherwise these only surface as "backend/operator not found" at model-load time.
-- **`libm` path rewrite** in top-level and `native_tests/CMakeLists.txt`: rewrites the tarball's baked-in absolute `/usr/lib64/libm.so` to portable `-lm`. Harmless where the path exists (manylinux/RHEL); unblocks Debian/Ubuntu. Remove once a corrected upstream tarball ships.
 
 ## Runtime fetch & provenance
 
