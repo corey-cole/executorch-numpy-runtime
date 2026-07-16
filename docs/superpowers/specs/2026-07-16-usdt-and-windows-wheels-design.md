@@ -72,7 +72,7 @@ release notes. Three findings materially changed the design:
 | D4 | Guard arms itself from `BUILDINFO`, not a platform check | `usdt=on` / `usdt=n/a` is self-describing; Windows disarms for free with no `if(LINUX)` anywhere |
 | D5 | No MSVC symbol guard; Windows substitutes a runtime backend assertion | Extracting symbols on Windows was a known problem for the runtime project too. Minimum effort: assert `XnnpackBackend` in `registered_backends()` |
 | D6 | Kernel-lib set derives from a CMake compile define | Keeps the link line the single source of truth; Python never sniffs `sys.platform` |
-| D7 | PR3 is gated by a `winbox` spike before any CI work | Prior art never linked `xnnpack_backend` under MSVC (see §5.1). If it fails, PR3 becomes an upstream request |
+| D7 | PR3 is gated by a `winbox` spike before any CI work | Prior art never linked `xnnpack_backend` under MSVC (see §5.1). If it fails, PR3 becomes an upstream request. **SATISFIED 2026-07-16 — spike PASSED; PR3 is unblocked** |
 
 ---
 
@@ -157,29 +157,42 @@ the specific risk this catches.
 
 ## 5. PR3 — Windows wheels
 
-### 5.1 Spike first (gating)
+### 5.1 Spike — **DONE 2026-07-16: PASSED, PR3 is unblocked**
 
-**Before any CI work**, on `winbox` (`ssh winbox`; VS activation → Git-Bash `bash -c`
-non-login handoff, per `~/workspace/windows-jni-handoff.md`):
+Full record: `docs/superpowers/notes/2026-07-16-windows-spike-findings.md`. Results, with
+the parts that change PR3's design:
 
-1. Link a `_core`-shaped **SHARED** target against `xnnpack_backend` under MSVC.
-2. Assert `XnnpackBackend` appears in `registered_backends()` at runtime.
-3. Determine whether cibuildwheel/scikit-build-core needs explicit `Launch-VsDevShell`
-   activation, or whether CMake's own MSVC discovery suffices.
+| Question | Verdict |
+|---|---|
+| Q1 — does `xnnpack_backend` link into a SHARED target under MSVC? | **PASS** — `xnn_probe.dll` + `probe_main.exe` link clean |
+| Q2 — does `XnnpackBackend` self-register? | **PASS** — verified in an EXE *and* in a `LoadLibrary`'d DLL (the shape `_core` actually is). `/OPT:REF` did not drop the static-init TU |
+| Q3 — is `Launch-VsDevShell` activation needed? | **No** — CMake selects the `Visual Studio 18 2026` generator and finds `cl.exe` via installer/registry; plain vs. activated shell identical |
 
-**Why this gates the PR:** no prior art covers it. The handoff doc scopes the Windows
-artifact as "core-only" and says *"Only rely on `executorch`"*;
-`executorch-runtime-dist`'s `test/consumer/CMakeLists.txt` links exactly that one target.
-The `.lib` and its `/WHOLEARCHIVE:` link options are present in the tarball, so this is
-expected to work — but it is unproven. **If the spike fails, PR3 stops and becomes an
-upstream parity request.**
+Q2 was the gate: this project deliberately ships **no** symbol guard on Windows (D5), so a
+runtime registration check is the only stand-in for the Linux `nm` guard. It holds.
 
-**Parity caveat:** winbox is **VS 18 Community**; the GitHub runner is **VS 2022/17
-Enterprise**. Per the handoff doc, winbox is for iterating and CI is the acceptance gate —
-a green spike is necessary, not sufficient.
+**Three findings that bind §5.3 and §5.6 — do not lose them:**
 
-Item 3 is genuinely open: the recipe needed explicit activation, but it drove Ninja
-directly rather than going through scikit-build-core. Resolve by spiking, not by guessing.
+1. **`/WHOLEARCHIVE:` is required but free — conditionally.** Upstream's
+   `ExecuTorchTargets.cmake:160` already carries it as `INTERFACE_LINK_OPTIONS`, confirmed
+   on the real link line, so PR3 must **not** hand-wrap `xnnpack_backend`. **But this holds
+   only while linking the `xnnpack_backend` CMake target.** Linking a raw `.lib` path
+   instead would silently break registration — and with no `nm` guard on Windows, nothing
+   would catch it until a model failed to load.
+2. **Q3's answer is generator-dependent.** Forcing `-G Ninja` reinstates the activation
+   requirement (Ninja needs `cl.exe` on `PATH`). The "no activation needed" answer is
+   contingent on letting CMake pick the Visual Studio generator.
+3. **The VS parity gap runs the opposite way from what this spec assumed.** winbox is
+   **VS 18.8.0 "Community 2026" / MSVC 19.51** — a major version *ahead* of CI's VS 2022/17
+   Enterprise, not behind it. So the spike proves a **newer** toolchain works, which does
+   not establish that the older CI toolchain does. CI remains the acceptance gate, and for
+   a sharper reason than "winbox is a dev box".
+
+**Known gap:** cibuildwheel was **not** exercised end-to-end on winbox — its `nuget`-based
+CPython provisioning fails there (for 3.13 and for the real 3.12 alike), never reaching
+CMake. Q3 was answered via `python -m build`, which drives the identical
+scikit-build-core → CMake path that cibuildwheel wraps. The claim "cibuildwheel works on
+Windows" is therefore **untested**; CI is the first place it will be proven.
 
 ### 5.2 Pin
 
@@ -298,17 +311,33 @@ different paths, and neither is a general guarantee:
 So the protection is circumstantial, not structural — it holds because of where the calls
 happen to live today.
 
-**Where it bites on Windows:**
+**Where it bites on Windows** (refined by the §5.1 spike — the hazard is **narrower** than
+first written here, but real):
 
-- **cibuildwheel / wheel build — protected**, by mechanism (1) above, same as Linux.
-  **Do not set `python_hints = false`**, and don't assume this extends beyond the
-  skbuild-driven path.
-- **The §5.1 spike — exposed.** A raw `cmake` invocation goes through neither mechanism.
-  The spike **must** pass `-DPython_EXECUTABLE=` explicitly, pointing at the interpreter
-  its deps were installed into, and must never rely on bare `python`.
+- **cibuildwheel / wheel build — protected, more strongly than mechanism (1) suggested.**
+  The spike found scikit-build-core **force-pins** `Python_EXECUTABLE` *and* sets
+  `Python_FIND_REGISTRY=NEVER`, so FindPython cannot wander off to a registry-installed
+  interpreter. **Do not set `python_hints = false`**, and don't assume this extends beyond
+  the skbuild-driven path.
+- **Raw `cmake` — exposed.** This is where the floor-vs-pin hazard actually lives: anything
+  not driven by scikit-build-core, including `native_tests/` and any ad-hoc spike build.
+  Pass `-DPython_EXECUTABLE=` explicitly and never rely on bare `python`.
 - **Any added Windows CI step invoking `python` bare — exposed**, and mechanism (2) does
   not port: there is no `/opt/python/cp312-cp312/bin` equivalent to prepend. Use an
   explicit interpreter path rather than a PATH prepend.
+
+**A cautionary note from the spike, worth more than the rule it illustrates.** The spike
+agent enumerated winbox's interpreters, concluded 3.12 was absent, and was about to have it
+installed — on a host where `python3.12` (3.12.10, 64-bit) was present the whole time.
+`py -0p` does not list Microsoft Store installs. Two lessons:
+
+- If a careful agent with shell access cannot reliably enumerate the interpreters on a
+  Windows host, **`find_package(Python 3.12)` cannot either** — which is the entire case
+  for pinning `Python_EXECUTABLE` rather than letting CMake choose.
+- On Windows, `…\WindowsApps\python3.12.exe` is a Store **alias shim**, not the real
+  interpreter (`sys.executable` resolves to a
+  `PythonSoftwareFoundation.Python.3.12_*\python.exe` path). Pass the **resolved**
+  `sys.executable`, not the shim, to `-DPython_EXECUTABLE`.
 
 **Action:** treat this as an acceptance criterion for PR3, not a footnote. During the
 spike, confirm which interpreter CMake actually resolved (echo `${Python_EXECUTABLE}`
@@ -323,8 +352,10 @@ biting outside the skbuild path, consider tightening line 16 to a version range
 
 | Risk | Mitigation |
 |---|---|
-| `xnnpack_backend` doesn't link/register under MSVC | §5.1 spike gates the PR; failure converts PR3 into an upstream request |
-| winbox (VS 18 Community) diverges from the runner (VS 2022/17 Enterprise) | Spike proves feasibility; the runner is the acceptance gate |
+| ~~`xnnpack_backend` doesn't link/register under MSVC~~ | **RETIRED 2026-07-16** — spike proved it links and self-registers, including in a `LoadLibrary`'d DLL (§5.1) |
+| PR3 links `xnnpack_backend` by raw `.lib` path instead of by CMake target, losing upstream's `/WHOLEARCHIVE:` and silently breaking registration | Link the **target**, never a path (§5.1 finding 1). No `nm` guard exists on Windows to catch it; the runtime `XnnpackBackend` assertion (D5) is the only net |
+| Spike passed on VS 18.8.0/MSVC 19.51 — a major version **ahead** of CI's VS 2022/17 Enterprise, so it proves the newer toolchain, not the older | CI is the acceptance gate. If CI's MSVC fails where winbox passed, suspect the version skew first |
+| cibuildwheel on Windows is unproven — its nuget CPython provisioning failed on winbox, so it was never exercised end-to-end | Q3 was answered via `python -m build` (same skbuild→CMake path). Expect first-run friction in CI and budget for it |
 | PR3 does five things at once | If review feels heavy, split §5.3 (capability contract) ahead of §5.6 (CI matrix) — it's independently useful and Linux-testable |
 | Vendored checker drifts from upstream | Vendored copy records its origin + release. Consider proposing upstream publish it as a release asset alongside `EtRuntimePin.cmake` |
 | A Windows user hits a model needing quantized/optimized ops | Declared in `runtime_info()["kernel_libs"]` and the README table (D1) |
