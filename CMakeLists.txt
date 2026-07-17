@@ -52,13 +52,29 @@ target_link_libraries(_core PRIVATE
 
 # _etnp_kernel_libs is the SINGLE SOURCE OF TRUTH for the advertised kernel set. Every APPEND
 # below must come before the JOIN at the bottom of this block.
-# portable is unconditional: portable_ops_lib ships in every tarball on every platform, and
-# arrives transitively via `executorch` -- do NOT link it explicitly.
+# "portable" is unconditional because portable aten coverage exists on every platform -- but it
+# arrives via a DIFFERENT library depending on the tarball, which is what the if/else below is for.
 set(_etnp_kernel_libs "portable")
 
+# optimized_native_cpu_ops_lib registers the FULL aten set (optimized kernels where available,
+# portable elsewhere), so where it exists it already provides portable coverage and
+# portable_ops_lib is pure redundancy. Where it does NOT exist (the core-only Windows tarball),
+# nothing registers aten ops unless we link portable_ops_lib ourselves -- `executorch` does NOT
+# pull it transitively (only the `executorch_kernels` INTERFACE target does).
+#
+# These are mutually exclusive ON PURPOSE. Linking both makes each aten op register twice ->
+# Error::RegistrationAlreadyRegistered (0x16), and register_kernels() is documented "Panics on
+# error" because it runs at static-init -> the module would ABORT on import. Double-registering
+# the full aten set also risks Error::RegistrationExceedingMaxKernels (0x15) against the
+# registry's fixed table. Do not "simplify" this into an unconditional link.
 if(TARGET optimized_native_cpu_ops_lib)
   target_link_libraries(_core PRIVATE optimized_native_cpu_ops_lib)
   list(APPEND _etnp_kernel_libs "optimized")
+else()
+  # Windows path: portable_ops_lib self-whole-archives via its own INTERFACE_LINK_OPTIONS
+  # (/WHOLEARCHIVE:), but only once something links it. Without this, a .pte fails at load with
+  # "Missing operator: aten::add.out" -- observed for real on the first Windows CI run.
+  target_link_libraries(_core PRIVATE portable_ops_lib)
 endif()
 
 if(TARGET quantized_ops_lib)
