@@ -244,8 +244,19 @@ that matters.
 
 ### 5.6 CI
 
-`build-wheels.yml` matrix gains **`windows-2022`** — pinned, matching the recipe, not
-`windows-latest`.
+`build-wheels.yml` matrix gains **`windows-2022`** — pinned, not `windows-latest`.
+
+**Why pinned, and why this image specifically:** `executorch-runtime-dist`'s `build-windows`
+job pins `runs-on: windows-2022` to *produce* the `.lib`s we link. Pinning the same image
+keeps consumer and producer toolchains aligned. Beyond that, the toolchain version is not
+cosmetic here — it **changes the DLL closure**: the spike's probe, built with winbox's MSVC
+19.51, imports `VCRUNTIME140_THREADS.dll`, a dependency a `windows-latest` drift could add
+or remove without us touching a line. §5.9 depends on that closure being stable. Note this
+diverges from `scikit-learn`'s reference workflow, which uses `windows-latest`.
+
+Also set `fail-fast: false` on the matrix (a Windows failure shouldn't cancel the Linux
+legs) and `CIBW_BUILD_VERBOSITY: 1` — without it the CMake log is swallowed and the
+POST_BUILD guards' STATUS lines are invisible in CI.
 
 Carry over two hard-won details from the recipe's `build-windows` job:
 - Discover VS **edition-agnostically** via `vswhere` (`-latest -products *`), so a runner
@@ -266,6 +277,74 @@ ceremony without evidence it's needed.
 ### 5.7 Documentation
 
 README gains a platform support table stating the Windows kernel gap plainly.
+
+### 5.9 Windows wheel repair — the C++ runtime
+
+**This section exists because the spec originally missed it.** §5.6 said only "add a matrix
+entry", which quietly assumed Windows wheels get repaired the way Linux ones do. They do
+not: **cibuildwheel does not repair Windows wheels by default.** There is no `auditwheel` on
+Windows; the equivalent is `delvewheel`, and it must be opted into.
+
+`scikit-learn`'s `build_tools/github/repair_windows_wheels.sh` says it outright — *"By
+default, the Windows wheels are not repaired. In this case, we need to vendor
+VCRUNTIME140.dll"* — and its `vendor.py` copies `msvcp140.dll` + `vcomp140.dll` into the
+wheel behind a `_distributor_init.py` that `WinDLL`-preloads them.
+
+**The measured facts** (from `dumpbin /dependents` on the spike's `_core`-shaped
+`xnn_probe.dll`, MSVC 19.51):
+
+| Import | Ships with CPython? | Action |
+|---|---|---|
+| `MSVCP140.dll` | **No** | must vendor |
+| `VCRUNTIME140_THREADS.dll` | **No** | must vendor (see §5.6 — appears with newer MSVC) |
+| `VCRUNTIME140.dll`, `VCRUNTIME140_1.dll` | Yes | leave alone |
+| `KERNEL32.dll`, `api-ms-win-crt-*` | System/UCRT (Win10+) | leave alone |
+| `vcomp140.dll` (OpenMP) | — | **not imported.** ExecuTorch uses pthreadpool, so unlike scikit-learn we need no OpenMP runtime |
+
+Without `msvcp140.dll`, a clean Windows box lacking the VC++ Redistributable fails
+`import executorch_numpy_runtime` with an opaque DLL-load error.
+
+**Static CRT is not an escape hatch.** `/MT` would remove the dependency, but the prebuilt
+ExecuTorch `.lib`s are built `/MD` (the tarball's BUILDINFO records no
+`CMAKE_MSVC_RUNTIME_LIBRARY`, so the default applies). Mixing runtimes is a link-time and
+heap-ownership hazard. We must match `/MD` unless upstream ships an `/MT` variant.
+
+**Decision: `delvewheel`, with the CRT named explicitly.**
+
+```
+CIBW_REPAIR_WHEEL_COMMAND_WINDOWS: >
+  delvewheel repair -w {dest_dir} {wheel} --add-dll msvcp140.dll;vcruntime140_threads.dll
+```
+
+`delvewheel` treats DLLs resolved out of `System32` as system libraries and skips them by
+default, so the CRT will **not** be vendored unless named — naming it is the whole point of
+the flag, not incidental. Chosen over hand-vendoring because it is the maintained standard,
+mangles vendored DLL names to avoid collisions with other wheels in the same process, and
+needs no import-time `WinDLL` side effect in our package.
+
+**Warm-host caveat, and why CI must prove this.** winbox cannot validate the fix: it has
+Visual Studio installed, so all four CRT DLLs are present in its `System32` and *any* wheel
+appears to work there. This is exactly the warm-host blind spot
+`~/workspace/windows-jni-handoff.md` warns about. The acceptance test must run where the
+redistributable is absent — a bare `windows-2022` runner job that installs the wheel and
+imports it, with no VS and no redist installed.
+
+### 5.10 Not adopted from scikit-learn
+
+Recorded so the reference isn't re-litigated later:
+
+- **`CIBW_CONFIG_SETTINGS_WINDOWS: "setup-args=--vsenv"`** — meson-python-specific
+  (`setup-args` is a meson flag). scikit-learn needs it because *"Meson detects a MINGW64
+  platform and uses MINGW64 toolchain"*. We are scikit-build-core + CMake, and the spike
+  proved CMake selects the Visual Studio generator and finds `cl.exe` unaided (§5.1 Q3).
+  **But the underlying hazard generalizes** — a bash shell on a Windows runner can steer a
+  build to the wrong toolchain — so the plan asserts the compiler actually used, rather
+  than assuming.
+- **`CIBW_BEFORE_TEST_WINDOWS` building a minimal Docker image** — scikit-learn tests its
+  Windows wheels inside a clean container. That is a heavier answer to the same
+  clean-machine question §5.9 raises; a bare runner job is sufficient at our scale.
+- **`windows-11-arm` / `win_arm64` matrix legs** — upstream ships no Windows-arm64 tarball.
+  Out of scope.
 
 ### 5.8 Pin the Python interpreter on Windows
 
