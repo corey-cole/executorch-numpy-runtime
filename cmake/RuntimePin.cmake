@@ -5,7 +5,10 @@
 # Bump procedure: update ETNP_ET_VERSION/ETNP_RUNTIME_VERSION AND the URL/SHA256 rows below
 # together to the next `v<etver>-<pkgrev>` executorch-runtime-dist release. The SHA256 change
 # is the supply-chain review gate; CI's separate `gh attestation verify` step covers provenance
-# (see docs on CI setup).
+# (see docs on CI setup). Also re-vendor scripts/check-usdt-notes.sh from the same upstream
+# release and update docs/usdt-tracepoints.md's probe table if the USDT probe contract
+# changed -- otherwise assert_usdt_probes.cmake keeps asserting the OLD contract, stays green
+# against surviving old probes, and a new/changed probe ships undocumented and unguarded.
 #
 # NOTE: the URL rows below are intentionally fully-resolved literals, not built from
 # ${ETNP_ET_VERSION}/${ETNP_RUNTIME_VERSION} substitution, even though that duplicates the

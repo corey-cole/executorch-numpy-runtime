@@ -16,18 +16,26 @@ if(NOT CHECKER OR NOT EXISTS "${CHECKER}")
   message(FATAL_ERROR "assert_usdt_probes: CHECKER not found: '${CHECKER}'")
 endif()
 
+if(NOT PREFIX)
+  message(STATUS "assert_usdt_probes: PREFIX not provided (invocation error, not a legitimate disarm) -- USDT guard disarmed")
+  return()
+endif()
+
 set(_buildinfo "${PREFIX}/BUILDINFO")
 if(NOT EXISTS "${_buildinfo}")
-  message(STATUS "assert_usdt_probes: no BUILDINFO at '${_buildinfo}' -- USDT guard disarmed")
+  message(STATUS "assert_usdt_probes: PREFIX '${PREFIX}' has no BUILDINFO (checked '${_buildinfo}') -- USDT guard disarmed")
   return()
 endif()
 
 file(READ "${_buildinfo}" _bi)
 if(NOT _bi MATCHES "(^|\n)usdt=on([\r\n]|$)")
-  message(STATUS "assert_usdt_probes: runtime does not record usdt=on -- USDT guard disarmed")
+  message(STATUS "assert_usdt_probes: runtime records no USDT (no usdt=on in '${_buildinfo}') -- USDT guard disarmed")
   return()
 endif()
 
+# find_program(bash) is deliberately below the BUILDINFO/usdt=on gate: a usdt=n/a runtime
+# (e.g. Windows) returns above before anything needs bash. Do not move this above the gate --
+# doing so would hard-fail every Windows build that lacks bash on PATH.
 find_program(_bash bash REQUIRED)
 execute_process(COMMAND "${_bash}" "${CHECKER}" --expect on "${SO}"
                 RESULT_VARIABLE _rc OUTPUT_VARIABLE _out ERROR_VARIABLE _err)
