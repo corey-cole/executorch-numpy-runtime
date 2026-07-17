@@ -87,16 +87,42 @@ endif()
 list(JOIN _etnp_kernel_libs "," _etnp_kernel_libs_str)
 message(STATUS "etnp: kernel libs linked = ${_etnp_kernel_libs_str}")
 
+# The nm-guard counts one codegen registrar TU per codegen'd ops lib actually linked. Derive it
+# from the link line rather than hardcoding 2, which was only right while both libs were always
+# present.
+set(_etnp_expect_codegen 0)
+if(TARGET optimized_native_cpu_ops_lib)
+  math(EXPR _etnp_expect_codegen "${_etnp_expect_codegen} + 1")
+endif()
+if(TARGET quantized_ops_lib)
+  math(EXPR _etnp_expect_codegen "${_etnp_expect_codegen} + 1")
+endif()
+
 target_compile_definitions(_core PRIVATE ETNP_ET_VERSION="${ETNP_ET_VERSION}")
 target_compile_definitions(_core PRIVATE ETNP_KERNEL_LIBS="${_etnp_kernel_libs_str}")
 
-# Post-link kernel-registration guard (fail the BUILD, not runtime). The custom
-# kernel seam appends its expected registrar TUs via ETNP_KERNEL_EXPECT_TUS.
-add_custom_command(TARGET _core POST_BUILD
-  COMMAND ${CMAKE_COMMAND} -DSO=$<TARGET_FILE:_core> -DNM=nm
-          "-DEXTRA_TUS=${ETNP_KERNEL_EXPECT_TUS}"
-          -P ${CMAKE_SOURCE_DIR}/cmake/assert_kernels_registered.cmake
-  VERBATIM)
+# Post-link kernel-registration guard (fail the BUILD, not runtime). The custom kernel seam
+# appends its expected registrar TUs via ETNP_KERNEL_EXPECT_TUS.
+#
+# GNU/Clang only, deliberately. Under MSVC this guard cannot work for three independent
+# reasons: there is no `nm`; MSVC emits ??__E-mangled initializers rather than the
+# _GLOBAL__sub_I_* symbols the guard matches; and the codegen TUs it counts come from
+# quantized_ops_lib + optimized_native_cpu_ops_lib, which the Windows tarball does not ship.
+# Windows substitutes a RUNTIME assertion instead -- XnnpackBackend must appear in
+# registered_backends() (see the spec's D5 and tests/test_meta_info.py). This is a known,
+# accepted asymmetry, not an oversight.
+if(CMAKE_CXX_COMPILER_ID MATCHES "^(GNU|Clang|AppleClang)$")
+  add_custom_command(TARGET _core POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -DSO=$<TARGET_FILE:_core> -DNM=nm
+            "-DEXTRA_TUS=${ETNP_KERNEL_EXPECT_TUS}"
+            "-DEXPECT_CODEGEN=${_etnp_expect_codegen}"
+            -P ${CMAKE_SOURCE_DIR}/cmake/assert_kernels_registered.cmake
+    VERBATIM)
+else()
+  message(STATUS
+    "etnp: assert_kernels_registered SKIPPED -- no nm/GNU symbols under '${CMAKE_CXX_COMPILER_ID}'. "
+    "Backend registration is asserted at runtime instead (see tests/test_meta_info.py).")
+endif()
 
 # Post-link USDT guard (fail the BUILD, not runtime). Self-arms off the runtime's BUILDINFO,
 # so this is a no-op on runtimes built without USDT (e.g. windows-x86_64: usdt=n/a).
