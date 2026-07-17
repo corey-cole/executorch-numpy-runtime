@@ -46,15 +46,17 @@ From the completed spike (`docs/superpowers/notes/2026-07-16-windows-spike-findi
 | File | Responsibility | Task |
 |---|---|---|
 | `cmake/RuntimePin.cmake` | add windows row; make platform detection OS-aware | 1 |
-| `CMakeLists.txt` | conditional link line; publish `ETNP_KERNEL_LIBS` | 2 |
+| `CMakeLists.txt` | floor assertion; conditional link line; publish `ETNP_KERNEL_LIBS`; gate the nm-guard | 2, 3 |
 | `src/binding/module.cpp` | expose `__kernel_libs__` | 2 |
 | `executorch_numpy_runtime/info.py` | read the define instead of hardcoding | 2 |
-| `tests/conftest.py` | capability-marker skip hook | 3 |
-| `tests/test_kernel_libs.py` | the contract's own tests | 3 |
-| `tests/test_meta_info.py` | XnnpackBackend assertion (Windows's only registration net) | 3 |
-| `.github/workflows/build-wheels.yml` | windows-2022 leg, delvewheel, wheel-content assertion | 4 |
-| `pyproject.toml` | delvewheel dep for the repair command | 4 |
-| `README.md` | platform support table | 5 |
+| `cmake/Kernels.cmake` | default the reference kernel OFF on Windows; document GNU-only symbols | 3 |
+| `cmake/assert_kernels_registered.cmake` | derive the codegen count from the link line | 3 |
+| `tests/conftest.py` | capability-marker skip hook | 4 |
+| `tests/test_kernel_libs.py` | the contract's own tests | 4 |
+| `tests/test_meta_info.py` | XnnpackBackend assertion (Windows's only registration net) | 4 |
+| `.github/workflows/build-wheels.yml` | windows-2022 leg, workflow_dispatch, wheel-content assertion | 5 |
+| `pyproject.toml` | pinned delvewheel + the Windows repair command | 5 |
+| `README.md` | platform support table | 6 |
 
 ---
 
@@ -117,7 +119,7 @@ set(ETNP_RUNTIME_SHA256_logging_windows-x86_64 "d2bc1859429fe33940adfd110f75d81b
 ```bash
 rm -rf build/pintest && cmake -S . -B build/pintest -DPython_EXECUTABLE=$PWD/.venv/bin/python 2>&1 | grep -iE "runtime|prefix" | head -3
 ```
-Expected: configures successfully, resolving the linux-x86_64 row exactly as before. This is the only locally-testable half of this task — Windows detection is proven in Task 4's CI run.
+Expected: configures successfully, resolving the linux-x86_64 row exactly as before. This is the only locally-testable half of this task — Windows detection is proven in Task 5's CI run.
 
 - [ ] **Step 4: Verify the windows row would resolve (without a Windows host)**
 
@@ -149,7 +151,7 @@ ETNPExtras, no USDT."
 
 **Interfaces:**
 - Consumes: Task 1's prefix.
-- Produces: `_core.__kernel_libs__` — a **semicolon-free, comma-separated** string, e.g. `"portable,optimized,quantized"` on Linux and `"portable"` on Windows. `runtime_info()["kernel_libs"]` returns it as a `list[str]`. Task 3 keys its skips off this.
+- Produces: `_core.__kernel_libs__` — a **semicolon-free, comma-separated** string, e.g. `"portable,optimized,quantized"` on Linux and `"portable"` on Windows. `runtime_info()["kernel_libs"]` returns it as a `list[str]`. Task 4 keys its skips off this.
 
 **Why:** `info.py:23` currently hardcodes `["portable", "optimized", "quantized"]`. On Windows that is simply false — `optimized_native_cpu_ops_lib` and `quantized_ops_lib` do not exist in the tarball. The link line must stay the single source of truth; Python must never sniff `sys.platform`.
 
@@ -207,19 +209,58 @@ Expected: `test_kernel_libs_matches_the_compile_define` FAILS with `AttributeErr
 
 - [ ] **Step 3: Make the link line conditional and compute the define**
 
-In `CMakeLists.txt`, replace the `target_link_libraries(_core PRIVATE executorch optimized_native_cpu_ops_lib xnnpack_backend quantized_ops_lib ...)` block (lines 33-35) with:
+**Read this first — it is why Step 3 has a guard in it.** `executorch-config.cmake` loops
+`find_library` over a required-lib list and, on the **first miss**, does:
 
 ```cmake
-# The Windows runtime tarball is core-only: optimized_native_cpu_ops_lib and quantized_ops_lib
-# do not exist there. Link what the prefix actually provides, and let that link line be the
-# single source of truth for the advertised kernel set (ETNP_KERNEL_LIBS below).
-# NOTE: link the TARGETS, never raw .lib paths -- upstream's ExecuTorchTargets.cmake carries
-# /WHOLEARCHIVE: as INTERFACE_LINK_OPTIONS, and a raw path silently loses backend registration.
+  if(NOT ${lib_var})
+    set(EXECUTORCH_FOUND OFF)
+    return()          # returns BEFORE include(ExecuTorchTargets.cmake)
+  endif()
+```
+
+It sets `EXECUTORCH_FOUND` (all-caps), but CMake's `REQUIRED` checks `ExecuTorch_FOUND`
+(the find_package name's casing). **Different variable.** So
+`find_package(ExecuTorch CONFIG REQUIRED)` can **silently succeed while defining zero
+targets**. Every `if(TARGET ...)` below would then be false — and the kernel set would
+advertise `portable` for entirely the wrong reason. Verified: this is exactly what happens
+when configuring the Windows prefix from Linux (`find_library` looks for `libexecutorch.a`,
+the tarball has `executorch.lib`).
+
+So the conditional link line needs a floor assertion.
+
+**This step gives you the ONE authoritative layout for `CMakeLists.txt` lines 31-45.** Do not
+treat it as a patch against the current text — write the region to look exactly like this.
+Ordering is load-bearing: **every `list(APPEND _etnp_kernel_libs ...)` must precede the
+`list(JOIN ...)`**, or the appended entry is silently dropped from the define.
+
+```cmake
+# find_package(ExecuTorch CONFIG REQUIRED) can succeed while defining NO targets: its config
+# early-returns on the first find_library miss, setting EXECUTORCH_FOUND (all-caps) -- which is
+# NOT the ExecuTorch_FOUND that REQUIRED checks. Without this floor, a config that bailed would
+# silently produce an empty link line and advertise kernel_libs=portable for the wrong reason.
+foreach(_req executorch xnnpack_backend)
+  if(NOT TARGET ${_req})
+    message(FATAL_ERROR
+      "find_package(ExecuTorch) did not define the '${_req}' target. Its config early-returns on "
+      "the first find_library miss WITHOUT failing find_package (it sets EXECUTORCH_FOUND, not "
+      "ExecuTorch_FOUND). Prefix: ${ETNP_RUNTIME_PREFIX} -- check it matches this platform and "
+      "that its lib/ contains the expected library naming for this toolchain.")
+  endif()
+endforeach()
+
+# Link what the prefix actually provides: the Windows tarball is core-only (no
+# optimized_native_cpu_ops_lib, no quantized_ops_lib). The runtime config self-whole-archives
+# the kernel/backend archives via INTERFACE_LINK_OPTIONS, so linking the TARGETS is enough --
+# never raw .lib paths, which lose /WHOLEARCHIVE: and silently break backend registration.
 target_link_libraries(_core PRIVATE
   executorch xnnpack_backend
   extension_module_static extension_data_loader extension_tensor)
 
-# portable is unconditional: portable_ops_lib ships in every tarball on every platform.
+# _etnp_kernel_libs is the SINGLE SOURCE OF TRUTH for the advertised kernel set. Every APPEND
+# below must come before the JOIN at the bottom of this block.
+# portable is unconditional: portable_ops_lib ships in every tarball on every platform, and
+# arrives transitively via `executorch` -- do NOT link it explicitly.
 set(_etnp_kernel_libs "portable")
 
 if(TARGET optimized_native_cpu_ops_lib)
@@ -232,19 +273,43 @@ if(TARGET quantized_ops_lib)
   list(APPEND _etnp_kernel_libs "quantized")
 endif()
 
+# PRESERVED from the current file (do not drop): the custom-kernel seam's archive. On Windows
+# this target does not exist -- Task 3 defaults ETNP_BUILD_REFERENCE_KERNEL OFF there, so
+# etnp_kernels has no sources and is never created.
+if(TARGET etnp_kernels)
+  target_link_libraries(_core PRIVATE "$<LINK_LIBRARY:WHOLE_ARCHIVE,etnp_kernels>")
+endif()
+
+# PRESERVED from the current file (do not drop), with one line added: the "lstm" append lives
+# HERE, inside this block and before the JOIN. etnp_extras_whole_archive only exists when the
+# prefix ships ETNPExtras, which is exactly when etnp::lstm.out is linked. Windows has no
+# ETNPExtras, so "lstm" is absent there.
+if(COMMAND etnp_extras_whole_archive)
+  etnp_extras_whole_archive(_core)
+  list(APPEND _etnp_kernel_libs "lstm")
+endif()
+
 # Comma-separated, NOT semicolon: a CMake list would expand into separate compile-define
-# arguments. This string is consumed verbatim by info.py.
+# arguments. This string is consumed verbatim by info.py. MUST come after every APPEND above.
 list(JOIN _etnp_kernel_libs "," _etnp_kernel_libs_str)
 message(STATUS "etnp: kernel libs linked = ${_etnp_kernel_libs_str}")
-```
 
-Then, alongside the existing `ETNP_ET_VERSION` define (line 45):
-
-```cmake
+target_compile_definitions(_core PRIVATE ETNP_ET_VERSION="${ETNP_ET_VERSION}")
 target_compile_definitions(_core PRIVATE ETNP_KERNEL_LIBS="${_etnp_kernel_libs_str}")
 ```
 
-**Do not** link `portable_ops_lib` explicitly — it arrives transitively via `executorch`, exactly as it does today. This task must not change what Linux links; only how it is *described*.
+**What this replaces, and what it deliberately keeps:**
+
+| Current lines | Fate |
+|---|---|
+| 31-32 (`# Link the whole ExecuTorch stack...` comment) | **rewritten** — "linking these targets is enough" stops being true once the link is conditional |
+| 33-35 (`target_link_libraries(... optimized_native_cpu_ops_lib ... quantized_ops_lib ...)`) | **replaced** by the conditional form |
+| 37-39 (`if(TARGET etnp_kernels)`) | **kept**, moved above the JOIN |
+| 41-43 (`if(COMMAND etnp_extras_whole_archive)`) | **kept**, moved above the JOIN, plus the `"lstm"` append |
+| 45 (`ETNP_ET_VERSION` define) | **kept**, now joined by the `ETNP_KERNEL_LIBS` define |
+| 47-53 (`assert_kernels_registered` POST_BUILD) | **untouched by this task** — Task 3 gates it |
+
+This task must not change **what** Linux links — only how it is *described*. Step 7 proves that.
 
 - [ ] **Step 4: Expose it through the binding**
 
@@ -294,7 +359,216 @@ define rather than sniffing sys.platform."
 
 ---
 
-## Task 3: Capability-driven test skips
+## Task 3: Windows-proof the build guards and the reference kernel
+
+**Files:**
+- Modify: `cmake/Kernels.cmake` (reference-kernel default; document the symbol convention)
+- Modify: `CMakeLists.txt:47-53` (gate the `assert_kernels_registered` POST_BUILD invocation)
+- Modify: `cmake/assert_kernels_registered.cmake` (derive expectations from the linked set)
+
+**Interfaces:**
+- Consumes: `_etnp_kernel_libs` from Task 2.
+- Produces: a build whose guards are correct on both toolchains. Task 5's CI run depends on this; without it the Windows leg fails at POST_BUILD.
+
+**Why this task exists — three certainties, not speculations.** `assert_kernels_registered`
+**will** fail on Windows, and we know it from reading the code rather than from a CI round-trip:
+
+1. **No `nm`.** `cmake/assert_kernels_registered.cmake:11-15` does
+   `execute_process(COMMAND "${NM}" "${SO}" ...)` and FATAL_ERRORs on non-zero. MSVC ships no `nm`.
+2. **Its symbols cannot exist under MSVC even if `nm` did.** It requires
+   `_GLOBAL__sub_I_XNNPACKBackend` — a GNU-style static-init symbol. MSVC emits `??__E`-mangled
+   dynamic initializers instead.
+3. **Two of its three checks reference libraries Windows doesn't have.** The
+   `_codegen_count >= 2` check counts TUs contributed by `quantized_ops_lib` +
+   `optimized_native_cpu_ops_lib`. Neither is in the Windows tarball, so the count is
+   structurally 0.
+
+Separately, `cmake/Kernels.cmake` defaults `ETNP_BUILD_REFERENCE_KERNEL` **ON**, so the Windows
+wheel would ship `etnp::triple.out` — which nobody intended, and which the README table
+(Task 6) claims is absent.
+
+- [ ] **Step 1: Default the reference kernel OFF on Windows**
+
+In `cmake/Kernels.cmake`, the option is currently a bare `ON`:
+
+```cmake
+option(ETNP_BUILD_REFERENCE_KERNEL
+  "Compile the bundled reference custom kernel (etnp::triple.out)" ON)
+```
+
+Make the default platform-dependent, keeping it an overridable option:
+
+```cmake
+# Default OFF on Windows: the upstream Windows runtime distribution ships no extras yet, so
+# Windows is a core-only runtime with no custom ops (see the README's platform table). Linux
+# keeps this ON, which is what keeps the custom-kernel seam CI-tested via
+# native_tests/kernel_registration_test.cpp -- the seam cannot rot just because Windows skips it.
+# Flip back on for Windows once upstream extras land there (and see the note on
+# ETNP_KERNEL_EXPECT_TUS below: the nm-guard's symbol names are GNU-only).
+if(WIN32)
+  set(_etnp_ref_kernel_default OFF)
+else()
+  set(_etnp_ref_kernel_default ON)
+endif()
+option(ETNP_BUILD_REFERENCE_KERNEL
+  "Compile the bundled reference custom kernel (etnp::triple.out)" ${_etnp_ref_kernel_default})
+```
+
+Consequence, which is the point: on Windows `_etnp_kernel_sources` is empty → the
+`etnp_kernels` target is never created → `if(TARGET etnp_kernels)` is false → nothing custom is
+linked → `ETNP_KERNEL_EXPECT_TUS` stays empty.
+
+- [ ] **Step 2: Document that the expected-TU symbols are GNU-only**
+
+Still in `cmake/Kernels.cmake`, above the `ETNP_KERNEL_EXPECT_TUS` loop, record the constraint
+so the next reader doesn't have to rediscover it:
+
+```cmake
+  # NOTE: these are GNU-style static-init symbol names. MSVC never emits _GLOBAL__sub_I_*
+  # (it emits ??__E-mangled dynamic initializers), so this list is only meaningful for a
+  # GNU/Clang link -- which is why CMakeLists.txt gates the nm-guard that consumes it.
+  foreach(_src IN LISTS _etnp_kernel_sources)
+```
+
+- [ ] **Step 3: Gate the `nm` guard on a toolchain that has one**
+
+In `CMakeLists.txt`, wrap the existing `assert_kernels_registered` POST_BUILD command (lines
+47-53). Keep the command itself byte-identical apart from the added `-DEXPECT_CODEGEN` argument
+in Step 4:
+
+```cmake
+# Post-link kernel-registration guard (fail the BUILD, not runtime). The custom kernel seam
+# appends its expected registrar TUs via ETNP_KERNEL_EXPECT_TUS.
+#
+# GNU/Clang only, deliberately. Under MSVC this guard cannot work for three independent
+# reasons: there is no `nm`; MSVC emits ??__E-mangled initializers rather than the
+# _GLOBAL__sub_I_* symbols the guard matches; and the codegen TUs it counts come from
+# quantized_ops_lib + optimized_native_cpu_ops_lib, which the Windows tarball does not ship.
+# Windows substitutes a RUNTIME assertion instead -- XnnpackBackend must appear in
+# registered_backends() (see the spec's D5 and tests/test_meta_info.py). This is a known,
+# accepted asymmetry, not an oversight.
+if(CMAKE_CXX_COMPILER_ID MATCHES "^(GNU|Clang|AppleClang)$")
+  add_custom_command(TARGET _core POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -DSO=$<TARGET_FILE:_core> -DNM=nm
+            "-DEXTRA_TUS=${ETNP_KERNEL_EXPECT_TUS}"
+            "-DEXPECT_CODEGEN=${_etnp_expect_codegen}"
+            -P ${CMAKE_SOURCE_DIR}/cmake/assert_kernels_registered.cmake
+    VERBATIM)
+else()
+  message(STATUS
+    "etnp: assert_kernels_registered SKIPPED -- no nm/GNU symbols under '${CMAKE_CXX_COMPILER_ID}'. "
+    "Backend registration is asserted at runtime instead (see tests/test_meta_info.py).")
+endif()
+```
+
+The `else()` branch is not decoration: a guard that vanishes silently is exactly the failure
+mode this repo's guards exist to prevent. Say so in the log.
+
+- [ ] **Step 4: Derive the codegen expectation from what was actually linked**
+
+`cmake/assert_kernels_registered.cmake:31-40` hardcodes `_codegen_count LESS 2`. That "2" is
+only correct by coincidence of `quantized_ops_lib` and `optimized_native_cpu_ops_lib` both
+always being present — a latent fragility on Linux, and simply wrong anywhere they aren't.
+Task 2 already computes the linked set, so derive it.
+
+In `CMakeLists.txt`, immediately after Task 2's `list(JOIN ...)` block, compute the expectation:
+
+```cmake
+# The nm-guard counts one codegen registrar TU per codegen'd ops lib actually linked. Derive it
+# from the link line rather than hardcoding 2, which was only right while both libs were always
+# present.
+set(_etnp_expect_codegen 0)
+if(TARGET optimized_native_cpu_ops_lib)
+  math(EXPR _etnp_expect_codegen "${_etnp_expect_codegen} + 1")
+endif()
+if(TARGET quantized_ops_lib)
+  math(EXPR _etnp_expect_codegen "${_etnp_expect_codegen} + 1")
+endif()
+```
+
+Then in `cmake/assert_kernels_registered.cmake`, replace the hardcoded check:
+
+```cmake
+# EXPECT_CODEGEN is supplied by the caller from the real link line (quantized_ops_lib and
+# optimized_native_cpu_ops_lib each codegen their own registration TU from the same upstream
+# template, so both land under the IDENTICAL local-symbol name -- count, don't string(FIND)).
+if(NOT DEFINED EXPECT_CODEGEN)
+  set(EXPECT_CODEGEN 2)  # back-compat for callers predating the derived count
+endif()
+string(REGEX MATCHALL "_GLOBAL__sub_I_RegisterCodegenUnboxedKernelsEverything\\.cpp"
+       _codegen_matches "${_syms}")
+list(LENGTH _codegen_matches _codegen_count)
+if(_codegen_count LESS ${EXPECT_CODEGEN})
+  message(FATAL_ERROR
+    "Expected ${EXPECT_CODEGEN} kernel-registration TU(s) named "
+    "'_GLOBAL__sub_I_RegisterCodegenUnboxedKernelsEverything.cpp' in ${SO}, found "
+    "${_codegen_count}: whole-archive regressed at final link for one of the kernel libs -> "
+    "op not found at model-load time.")
+endif()
+```
+
+Leave the `_GLOBAL__sub_I_XNNPACKBackend` check and the `EXTRA_TUS` loop untouched.
+
+**`native_tests/` also invokes this guard.** Check whether it passes `EXPECT_CODEGEN`; the
+`if(NOT DEFINED ...)` default above keeps it working either way, which is why the default
+exists. Confirm rather than assume:
+
+```bash
+grep -rn "assert_kernels_registered\|EXTRA_TUS" native_tests/CMakeLists.txt
+```
+
+- [ ] **Step 5: Verify Linux is completely unchanged**
+
+This task must be a no-op on Linux. Rebuild and prove it:
+
+```bash
+rm -rf build && uv pip install -e . --no-build-isolation --reinstall 2>&1 | grep -iE "kernel libs|assert_kernels|SKIPPED"
+.venv/bin/python -c "from executorch_numpy_runtime import runtime_info; print(sorted(o for o in runtime_info()['operators'] if o.startswith('etnp')))"
+.venv/bin/python -m pytest tests/ -q 2>&1 | tail -2
+```
+Expected: the build still prints `etnp: kernel libs linked = portable,optimized,quantized,lstm`;
+`assert_kernels_registered` still **runs** (no SKIPPED line — this is GCC); etnp ops are still
+`['etnp::lstm.out', 'etnp::triple.out']`; suite passes with the same 2 by-design skips.
+
+**If the etnp ops list lost `triple.out` on Linux, Step 1's `if(WIN32)` is wrong** — stop and
+report.
+
+- [ ] **Step 6: Prove the guard still fails when it should (do not skip this)**
+
+Gating a guard is exactly when to re-verify it still bites on the platform where it runs:
+
+```bash
+REAL=$(.venv/bin/python -c "import executorch_numpy_runtime._core as c; print(c.__file__)")
+cp "$REAL" /tmp/nostrip-test.so && strip --strip-all /tmp/nostrip-test.so
+cmake -DSO=/tmp/nostrip-test.so -DNM=nm -DEXPECT_CODEGEN=2 \
+      -P cmake/assert_kernels_registered.cmake; echo "rc=$?"
+```
+Expected: FATAL_ERROR naming the missing registration, `rc=1`.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add cmake/Kernels.cmake CMakeLists.txt cmake/assert_kernels_registered.cmake
+git commit -m "feat: Make the build guards and reference kernel Windows-correct
+
+assert_kernels_registered cannot work under MSVC for three independent reasons:
+there is no nm; MSVC emits ??__E-mangled initializers rather than the
+_GLOBAL__sub_I_* symbols it matches; and the codegen TUs it counts come from
+quantized_ops_lib + optimized_native_cpu_ops_lib, which the Windows tarball does
+not ship. It is now gated to GNU/Clang and says so in the log rather than
+vanishing silently. Windows substitutes the runtime XnnpackBackend assertion.
+
+The codegen count is derived from the real link line instead of a hardcoded 2,
+which was only correct while both ops libs were always present.
+
+ETNP_BUILD_REFERENCE_KERNEL now defaults OFF on Windows: upstream ships no extras
+there, so Windows is core-only with no custom ops. Linux keeps it ON, which is
+what keeps the custom-kernel seam CI-tested."
+```
+
+---
+
+## Task 4: Capability-driven test skips
 
 **Files:**
 - Modify: `tests/conftest.py`
@@ -382,16 +656,12 @@ grep -rln "lstm" tests/
 
 Add `@pytest.mark.requires_kernel_lib("quantized")` to tests using `tests/models/quantized.pte`, and `@pytest.mark.requires_kernel_lib("lstm")` to the LSTM tests in `tests/test_lstm_smoke.py`.
 
-**Important:** `"lstm"` is NOT currently a member of `kernel_libs` — Task 2 only emits portable/optimized/quantized. Add it in `CMakeLists.txt` alongside the others so the marker has something to key on:
+**No CMake edit is needed here.** `"lstm"` is already appended to `_etnp_kernel_libs` by Task 2's layout, inside the `if(COMMAND etnp_extras_whole_archive)` block and before the `list(JOIN ...)`. That ordering is load-bearing — an append after the JOIN is silently dropped — which is why the layout owns it rather than this step. Verify it is there before marking anything:
 
-```cmake
-if(COMMAND etnp_extras_whole_archive)
-  list(APPEND _etnp_kernel_libs "lstm")
-endif()
+```bash
+.venv/bin/python -c "from executorch_numpy_runtime import runtime_info; print(runtime_info()['kernel_libs'])"
 ```
-Place this next to the other `list(APPEND ...)` calls, before the `list(JOIN ...)`. It must sit inside the existing `if(COMMAND etnp_extras_whole_archive)` block or duplicate its condition — that command only exists when the prefix ships ETNPExtras, which is exactly when `etnp::lstm.out` is linked. Windows has no ETNPExtras, so `"lstm"` is absent there.
-
-Rebuild after this CMake edit (`rm -rf build && uv pip install -e . --no-build-isolation --reinstall`).
+Expected: `['portable', 'optimized', 'quantized', 'lstm']`. If `lstm` is missing, Task 2's layout was mis-applied (append landed after the JOIN) — fix that rather than adding a second append here.
 
 - [ ] **Step 6: Verify nothing regressed on Linux**
 
@@ -437,14 +707,14 @@ no symbol guard there, it is the only net under the static-init registrar."
 
 ---
 
-## Task 4: CI — Windows leg + delvewheel
+## Task 5: CI — Windows leg + delvewheel
 
 **Files:**
 - Modify: `.github/workflows/build-wheels.yml`
 - Modify: `pyproject.toml` (cibuildwheel config)
 
 **Interfaces:**
-- Consumes: Tasks 1-3.
+- Consumes: Tasks 1-4.
 - Produces: a repaired `cp312-win_amd64` wheel containing the vendored CRT.
 
 **The two facts driving this task:**
@@ -482,10 +752,18 @@ In `pyproject.toml`'s `[tool.cibuildwheel]` section, add:
 # DLL-load error. delvewheel treats System32-resolved DLLs as system libraries and skips them
 # unless named, which is why --add-dll is required rather than optional.
 # Static CRT is not an option: the prebuilt ExecuTorch .libs are /MD.
-before-build-windows = "pip install delvewheel"
+#
+# delvewheel is PINNED on purpose. It decides which DLLs land in the shipped wheel, so an
+# unpinned upgrade could silently change the wheel's contents -- in a project that pins its
+# runtime tarball by SHA256 and attests it in CI, an unpinned wheel-repair tool would be the
+# loosest link in the chain. Bump procedure: raise the pin deliberately, then re-run the
+# Step 3 assertion below to confirm both CRT DLLs are still vendored under the new version.
+before-build-windows = "pip install delvewheel==1.13.0"
 repair-wheel-command-windows = "delvewheel repair -w {dest_dir} {wheel} --add-dll msvcp140.dll;vcruntime140_threads.dll"
 build-verbosity = 1
 ```
+
+`1.13.0` is the current release (2026-05-28). If a newer one exists when you implement this, use it and say so in the report — the point is that the version is *chosen and recorded*, not that it is frozen forever.
 
 `build-verbosity = 1` matters: without it the CMake log is swallowed and the POST_BUILD guards' STATUS lines never appear in CI.
 
@@ -550,7 +828,7 @@ If the run fails, read the actual log (`gh run view <id> --log-failed`) and repo
 Then report, from the real log:
 1. Did the Windows leg configure? Look for `Check for working CXX compiler` naming `cl.exe`. Confirms the spike's Q3 on the *actual* runner (winbox was VS 18.8; this is VS 2022 — a major version apart).
 2. What did `etnp: kernel libs linked = ...` print on Windows? Expect `portable` only.
-3. Did `assert_kernels_registered` run? It shells to `nm`, which MSVC lacks. **If it fails the Windows build, that is a real finding** — report it; the fix is to make that guard Linux-only, mirroring how `assert_usdt_probes` self-disarms. Do not delete the guard.
+3. Did `assert_kernels_registered` **skip**, loudly? Task 3 gated it to GNU/Clang, so the Windows log must contain `etnp: assert_kernels_registered SKIPPED -- no nm/GNU symbols under 'MSVC'`. Two failure modes to look for: if it **ran** and failed, the gate's compiler-ID match is wrong; if **no line appears at all**, the gate is silently swallowing it, which is the failure mode this repo's guards exist to prevent. Report which you saw.
 4. Did `assert_usdt_probes` disarm cleanly on Windows (`usdt=n/a`)? It should print the "records no USDT" STATUS and not fail.
 5. Did the test suite pass, and did the quantized/LSTM tests **skip** rather than fail?
 6. Did delvewheel vendor both DLLs (Step 3's assertion)?
@@ -577,7 +855,7 @@ regardless."
 
 ---
 
-## Task 5: Document the platform contract
+## Task 6: Document the platform contract
 
 **Files:**
 - Modify: `README.md`
@@ -597,13 +875,18 @@ Add to `README.md`, near the existing backend/platform prose:
 
 | Platform | Wheel | Kernel libs (`kernel_libs`) | Custom ops | USDT probes |
 |---|---|---|---|---|
-| Linux x86_64 (manylinux_2_28) | `cp312-abi3` | portable, optimized, quantized, lstm | `etnp::lstm.out` | yes |
-| Linux aarch64 (manylinux_2_28) | `cp312-abi3` | portable, optimized, quantized, lstm | `etnp::lstm.out` | yes |
+| Linux x86_64 (manylinux_2_28) | `cp312-abi3` | portable, optimized, quantized, lstm | `etnp::lstm.out`, `etnp::triple.out` | yes |
+| Linux aarch64 (manylinux_2_28) | `cp312-abi3` | portable, optimized, quantized, lstm | `etnp::lstm.out`, `etnp::triple.out` | yes |
 | Windows x86_64 | `cp312-abi3` | **portable only** | **none** | no (Linux-only) |
 
 `lstm` appears in `kernel_libs` because `libetnp_ops_lstm.a` is literally a kernel library —
-the one that provides the `etnp::lstm.out` custom op. The two columns describe the same
-artifact from different angles: what was linked, and what op that gives you.
+the one providing the `etnp::lstm.out` custom op. The two columns describe the same artifact
+from different angles: what was linked, and what op that gives you.
+
+`etnp::triple.out` is a bundled **reference** kernel, built by default on Linux and kept
+CI-tested so the custom-kernel wiring can't rot. It is deliberately **not** built on Windows
+(`ETNP_BUILD_REFERENCE_KERNEL` defaults OFF there) because the upstream Windows runtime ships
+no extras yet — which is what makes the Windows "none" true rather than aspirational.
 
 **Windows is a reduced runtime.** The upstream ExecuTorch distribution ships a core-only
 build for Windows: no optimized-kernel library, no quantized-kernel library, and no
@@ -620,14 +903,32 @@ runtime_info()["kernel_libs"]   # e.g. ['portable', 'optimized', 'quantized', 'l
 This list is derived from the build's real link line, so it cannot drift from what shipped.
 ```
 
-- [ ] **Step 2: Verify the doc's claim against reality**
+- [ ] **Step 2: Verify EVERY column of the table against the real build**
 
-The table says Linux has all four. Confirm:
+An earlier draft of this table was wrong on **both** Linux rows and the Windows row, because it
+was written from intent rather than from the build. Do not repeat that: read the values out and
+match them.
 
 ```bash
-.venv/bin/python -c "from executorch_numpy_runtime import runtime_info; print(runtime_info()['kernel_libs'])"
+.venv/bin/python - <<'PY'
+from executorch_numpy_runtime import runtime_info
+info = runtime_info()
+print("kernel_libs :", info["kernel_libs"])
+print("etnp ops    :", sorted(o for o in info["operators"] if o.startswith("etnp")))
+PY
 ```
-Expected: `['portable', 'optimized', 'quantized', 'lstm']`, matching the table's Linux rows. A doc that contradicts the code is a defect.
+Expected on Linux, and the table's Linux rows must match **exactly**:
+```
+kernel_libs : ['portable', 'optimized', 'quantized', 'lstm']
+etnp ops    : ['etnp::lstm.out', 'etnp::triple.out']
+```
+
+Both columns matter. The custom-ops column is the one that was previously wrong — it listed
+only `lstm.out` while the wheel also ships `triple.out`. A doc that contradicts the code is a
+defect, and this table makes two independent claims, so check two.
+
+The Windows row cannot be verified locally; it follows from Task 3 Step 1 (reference kernel OFF
+→ no custom ops) and Task 5's CI run, which prints `etnp: kernel libs linked = portable`.
 
 - [ ] **Step 3: Run the docs test**
 
@@ -666,5 +967,6 @@ Before considering this branch done:
 ## Known limits (state these; do not paper over them)
 
 - **A true clean-machine import is unproven.** Both winbox and the `windows-2022` runner ship Visual Studio, so the CRT is in `System32` on each and an import succeeds there whether or not vendoring worked. The wheel-content assertion proves vendoring happened; it does not prove the wheel loads without the redistributable. A container without the redist would close this (scikit-learn's approach) and is out of scope here.
-- **`assert_kernels_registered` on Windows is an open question** (Task 4 Step 4, item 3). It shells to `nm`. If it fails the Windows build, mirror `assert_usdt_probes`'s self-disarm rather than deleting the guard.
 - **cibuildwheel-on-Windows has never run for this project.** winbox's nuget CPython provisioning failed, so the first real exercise is this CI run. Expect first-run friction.
+- **The custom-kernel seam is unproven under MSVC** — and stays that way by choice. Task 3 defaults `ETNP_BUILD_REFERENCE_KERNEL` OFF on Windows, so nothing custom is linked there and there is nothing to prove yet. Linux keeps the seam CI-tested, so it cannot rot. When upstream ships extras for windows-x86_64, this reopens: `EXECUTORCH_LIBRARY`'s registrar is **not** the same code path as XNNPACK's own, and `/OPT:REF` is the hazard. The spike proved XNNPACK's registrar survives; ours is untested on MSVC.
+- **No symbol-level registration guard exists on Windows, by design** (spec D5). `assert_kernels_registered` is gated to GNU/Clang in Task 3 for three reasons that cannot be engineered around here: no `nm`, MSVC's `??__E` initializer mangling, and the codegen TUs coming from ops libs the Windows tarball doesn't ship. The runtime `XnnpackBackend` assertion is the whole net. If it ever regresses, Windows loses its only registration check.
