@@ -4,6 +4,8 @@ kernel_libs is derived from a CMake compile define computed from the real link
 line, so these assertions hold on any platform without sniffing sys.platform.
 """
 
+import pytest
+
 import executorch_numpy_runtime as en
 from executorch_numpy_runtime import _core
 
@@ -38,3 +40,14 @@ def test_quantized_implies_the_op_is_registered():
     info = en.runtime_info()
     if "quantized" in info["kernel_libs"]:
         assert any("quantized" in op for op in info["operators"])
+
+
+@pytest.mark.requires_kernel_lib("portable")
+def test_marker_runs_when_lib_present():
+    # portable is always linked, so this must actually execute, not skip.
+    assert "portable" in en.runtime_info()["kernel_libs"]
+
+
+@pytest.mark.requires_kernel_lib("definitely-not-a-real-kernel-lib")
+def test_marker_skips_when_lib_absent():
+    raise AssertionError("must have been skipped by the requires_kernel_lib marker")

@@ -19,11 +19,13 @@ def _load_fixture():
     return [inp, h0, c0], expected
 
 
+@pytest.mark.requires_kernel_lib("lstm")
 def test_lstm_op_registered():
     # The upstream runtime (v1.3.1-4) ships etnp::lstm.out registered at load time.
     assert "etnp::lstm.out" in _core.operator_names()
 
 
+@pytest.mark.requires_kernel_lib("lstm")
 def test_lstm_pte_matches_golden():
     inputs, expected = _load_fixture()
     rt = _core.load_path(str(LSTM / "lstm.pte"))

@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 import executorch_numpy_runtime as en
 from conftest import model_or_skip
 
@@ -28,6 +29,7 @@ def test_dynamic_shape_within_bounds():
         np.testing.assert_allclose(out, np.full(n, 2.0, np.float32))
 
 
+@pytest.mark.requires_kernel_lib("quantized")
 def test_quantized_model_runs():
     m = _method("quantized.pte")
     out = m([np.random.randn(2, 8).astype(np.float32)])

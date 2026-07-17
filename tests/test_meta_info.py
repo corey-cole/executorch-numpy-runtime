@@ -11,6 +11,9 @@ def test_method_meta_shapes():
     assert meta["inputs"][0]["scalar_type"] == 6  # Float
 
 
+# Load-bearing on Windows: there is no nm/symbol guard there (see the spec's D5), so this
+# runtime assertion is the only check that XNNPACK's static-init registrar survived the
+# link. cibuildwheel runs this suite against the built wheel, which is what makes it a gate.
 def test_runtime_info_reports_version_and_backends():
     info = en.runtime_info()
     assert info["executorch_version"] == "1.3.1"
