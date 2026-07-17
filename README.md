@@ -34,6 +34,37 @@ out = prog.load_method("forward")([np.ones(3, np.float32), np.ones(3, np.float32
 
 - **Outputs are always fresh copies** — never views into runtime memory; safe to keep across subsequent calls.
 
+## Platform support
+
+| Platform | Wheel | Kernel libs (`kernel_libs`) | Custom ops | USDT probes |
+|---|---|---|---|---|
+| Linux x86_64 (manylinux_2_28) | `cp312-abi3` | portable, optimized, quantized, lstm | `etnp::lstm.out`, `etnp::triple.out` | yes |
+| Linux aarch64 (manylinux_2_28) | `cp312-abi3` | portable, optimized, quantized, lstm | `etnp::lstm.out`, `etnp::triple.out` | yes |
+| Windows x86_64 | `cp312-abi3` | **portable only** | **none** | no (Linux-only) |
+
+`lstm` appears in `kernel_libs` because `libetnp_ops_lstm.a` is literally a kernel library —
+the one providing the `etnp::lstm.out` custom op. The two columns describe the same artifact
+from different angles: what was linked, and what op that gives you.
+
+`etnp::triple.out` is a bundled **reference** kernel, built by default on Linux and kept
+CI-tested so the custom-kernel wiring can't rot. It is deliberately **not** built on Windows
+(`ETNP_BUILD_REFERENCE_KERNEL` defaults OFF there) because the upstream Windows runtime ships
+no extras yet — which is what makes the Windows "none" true rather than aspirational.
+
+**Windows is a reduced runtime.** The upstream ExecuTorch distribution ships a core-only
+build for Windows: no optimized-kernel library, no quantized-kernel library, and no
+`etnp::lstm.out`. A `.pte` that loads on Linux may therefore fail on Windows with an
+operator-not-found error at load time. XNNPACK delegation works on all three.
+
+Query what a given install actually has — never assume from the platform:
+
+```python
+from executorch_numpy_runtime import runtime_info
+runtime_info()["kernel_libs"]   # e.g. ['portable', 'optimized', 'quantized', 'lstm']
+```
+
+This list is derived from the build's real link line, so it cannot drift from what shipped.
+
 ## Concurrency
 
 A single `Runtime` instance is thread-safe to share across threads, but method calls serialize (per-Runtime lock). For true parallel inference, create one `Runtime` per thread. XNNPACK still parallelizes within a single call via thread pool.
