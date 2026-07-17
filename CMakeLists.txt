@@ -52,4 +52,13 @@ add_custom_command(TARGET _core POST_BUILD
           -P ${CMAKE_SOURCE_DIR}/cmake/assert_kernels_registered.cmake
   VERBATIM)
 
+# Post-link USDT guard (fail the BUILD, not runtime). Self-arms off the runtime's BUILDINFO,
+# so this is a no-op on runtimes built without USDT (e.g. windows-x86_64: usdt=n/a).
+add_custom_command(TARGET _core POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -DSO=$<TARGET_FILE:_core>
+          -DPREFIX=${ETNP_RUNTIME_PREFIX}
+          -DCHECKER=${CMAKE_SOURCE_DIR}/scripts/check-usdt-notes.sh
+          -P ${CMAKE_SOURCE_DIR}/cmake/assert_usdt_probes.cmake
+  VERBATIM)
+
 install(TARGETS _core LIBRARY DESTINATION executorch_numpy_runtime)

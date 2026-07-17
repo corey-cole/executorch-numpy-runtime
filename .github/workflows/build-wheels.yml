@@ -28,6 +28,27 @@ jobs:
       - name: Build wheels
         uses: pypa/cibuildwheel@v4.1.0
 
+      - name: Assert USDT probes survived auditwheel repair
+        # The build-time .so and the repaired .so are different bytes: auditwheel runs
+        # patchelf, which rewrites soname/rpath/dynamic sections and has historically
+        # shuffled note sections. cmake/assert_usdt_probes.cmake only sees the former.
+        # Linux-only: USDT does not exist on other platforms (BUILDINFO usdt=n/a).
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          wheels=(wheelhouse/*.whl)
+          test "${#wheels[@]}" -gt 0 || { echo "no wheels in wheelhouse/"; exit 1; }
+          for whl in "${wheels[@]}"; do
+            tmp="$(mktemp -d)"
+            unzip -q "$whl" -d "$tmp"
+            so="$(find "$tmp" -name '_core*.so' -print -quit)"
+            test -n "$so" || { echo "no _core*.so inside $whl"; exit 1; }
+            echo "== $whl"
+            bash scripts/check-usdt-notes.sh --expect on "$so"
+          done
+
       - uses: actions/upload-artifact@v7
         with:
           name: wheels-${{ matrix.os }}

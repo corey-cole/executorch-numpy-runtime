@@ -65,6 +65,7 @@ Three layers, bottom-up:
 ## Build-time guards (these fail the *build*, not runtime)
 
 - **`cmake/assert_kernels_registered.cmake`** (POST_BUILD `nm` guard): fails the build if the XNNPACK/quantized/optimized kernel-registration static-init TUs were garbage-collected out of the `.so`. This is why the module is built `NOSTRIP` — a stripped symbol table would make the guard blind. Otherwise these only surface as "backend/operator not found" at model-load time.
+- **`cmake/assert_usdt_probes.cmake`** (POST_BUILD guard): fails the build if the ExecuTorch USDT tracepoints don't survive the link into `_core`. Self-arms by reading `usdt=on` from the runtime prefix's `BUILDINFO` — deliberately not a platform check, so runtimes without USDT (Windows records `usdt=n/a`; pre-v1.3.1-5 runtimes have no `usdt=` key) disarm automatically. The probes come from `libetnp_ops_lstm.a` via `etnp_extras_whole_archive()`, not from ExecuTorch's core libs. See `docs/usdt-tracepoints.md`.
 
 ## Runtime fetch & provenance
 
