@@ -520,14 +520,32 @@ The existing USDT post-repair step is `if: runner.os == 'Linux'`. Add its Window
 
 This fails closed: no wheels, or a wheel missing either DLL, fails the job.
 
-- [ ] **Step 4: Push and read the real CI run**
+- [ ] **Step 4: Add a manual trigger**
 
-This task **cannot be verified locally** — there is no Windows host in the loop and winbox cannot answer the question anyway. Push the branch and read the actual run:
+`build-wheels.yml` currently triggers only on `push: branches: [main]`, `pull_request`, and `release` — so pushing this branch fires **no run at all**, and there is otherwise no way to exercise the Windows leg without opening a PR. `qa-gate.yml` already has `workflow_dispatch`; this workflow lacking it is an inconsistency. Add it:
+
+```yaml
+on:
+  push:
+    branches: [main]
+  pull_request:
+  release:
+    types: [published]
+  workflow_dispatch:
+```
+
+- [ ] **Step 5: Push, trigger, and read the real CI run**
+
+This task **cannot be verified locally** — there is no Windows host in the loop, and winbox cannot answer the question anyway (it has Visual Studio; see the facts section). CI is the only evidence.
 
 ```bash
 git push -u origin feature/windows-wheels
-gh run watch "$(gh run list --branch feature/windows-wheels --limit 1 --json databaseId -q '.[0].databaseId')"
+gh workflow run "Build and publish wheels" --ref feature/windows-wheels
+sleep 10
+gh run watch "$(gh run list --workflow='Build and publish wheels' --branch feature/windows-wheels --limit 1 --json databaseId -q '.[0].databaseId')"
 ```
+
+If the run fails, read the actual log (`gh run view <id> --log-failed`) and report what it says. Do **not** infer the cause from the plan's expectations — this is the first time cibuildwheel has ever run on Windows for this project, and first-run friction is expected.
 
 Then report, from the real log:
 1. Did the Windows leg configure? Look for `Check for working CXX compiler` naming `cl.exe`. Confirms the spike's Q3 on the *actual* runner (winbox was VS 18.8; this is VS 2022 — a major version apart).
@@ -537,7 +555,7 @@ Then report, from the real log:
 5. Did the test suite pass, and did the quantized/LSTM tests **skip** rather than fail?
 6. Did delvewheel vendor both DLLs (Step 3's assertion)?
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add .github/workflows/build-wheels.yml pyproject.toml
