@@ -322,12 +322,28 @@ the flag, not incidental. Chosen over hand-vendoring because it is the maintaine
 mangles vendored DLL names to avoid collisions with other wheels in the same process, and
 needs no import-time `WinDLL` side effect in our package.
 
-**Warm-host caveat, and why CI must prove this.** winbox cannot validate the fix: it has
-Visual Studio installed, so all four CRT DLLs are present in its `System32` and *any* wheel
-appears to work there. This is exactly the warm-host blind spot
-`~/workspace/windows-jni-handoff.md` warns about. The acceptance test must run where the
-redistributable is absent — a bare `windows-2022` runner job that installs the wheel and
-imports it, with no VS and no redist installed.
+**Warm-host caveat — and the honest limit of what CI can prove here.** winbox cannot
+validate this: it has Visual Studio installed, so all four CRT DLLs sit in its `System32`
+and *any* wheel appears to work. That is the warm-host blind spot
+`~/workspace/windows-jni-handoff.md` warns about.
+
+**The GitHub `windows-2022` runner has the same blind spot** — it ships Visual Studio, so
+`import` succeeds there whether or not we vendored anything. A passing import on the runner
+is therefore **not** evidence the vendoring worked. This is exactly why scikit-learn builds
+a minimal Windows Docker image to test its wheels (§5.10).
+
+So the verification is split, and neither half is skipped:
+
+1. **Mechanical, in CI (authoritative for "did vendoring happen"):** assert the repaired
+   wheel actually *contains* `msvcp140*.dll` and `vcruntime140_threads*.dll` (delvewheel
+   mangles the names, so match by prefix). This is the Windows analogue of PR2's
+   post-`auditwheel` probe check, and it fails closed.
+2. **Behavioral, deferred (authoritative for "does it work clean"):** a true clean-machine
+   import needs a container without the redistributable. Out of scope for this plan;
+   recorded as a known limit rather than papered over with a runner import that proves
+   nothing.
+
+Do **not** report "verified on Windows" on the strength of a runner-side import.
 
 ### 5.10 Not adopted from scikit-learn
 
