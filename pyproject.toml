@@ -63,11 +63,25 @@ test-requires = ["pytest"]
 # unless named, which is why --add-dll is required rather than optional.
 # Static CRT is not an option: the prebuilt ExecuTorch .libs are /MD.
 #
+# build-verbosity is GLOBAL on purpose: without it the CMake log is swallowed and the
+# POST_BUILD guards' STATUS lines never appear in CI -- wanted on every leg, not just Windows.
+build-verbosity = 1
+
+# cibuildwheel does NOT repair Windows wheels by default -- there is no auditwheel there.
+# _core is C++ and imports MSVCP140.dll + VCRUNTIME140_THREADS.dll, neither of which ships
+# with CPython, so a machine without the VC++ Redistributable fails to import with an opaque
+# DLL-load error. delvewheel treats System32-resolved DLLs as system libraries and skips them
+# unless named, which is why --add-dll is required rather than optional.
+# Static CRT is not an option: the prebuilt ExecuTorch .libs are /MD.
+#
 # delvewheel is PINNED on purpose. It decides which DLLs land in the shipped wheel, so an
 # unpinned upgrade could silently change the wheel's contents -- in a project that pins its
 # runtime tarball by SHA256 and attests it in CI, an unpinned wheel-repair tool would be the
 # loosest link in the chain. Bump procedure: raise the pin deliberately, then re-run the
-# Step 3 assertion below to confirm both CRT DLLs are still vendored under the new version.
-before-build-windows = "pip install delvewheel==1.13.0"
-repair-wheel-command-windows = "delvewheel repair -w {dest_dir} {wheel} --add-dll msvcp140.dll;vcruntime140_threads.dll"
-build-verbosity = 1
+# Step 4 assertion below to confirm both CRT DLLs are still vendored under the new version.
+#
+# NOTE: this sub-table MUST stay last in [tool.cibuildwheel] -- every key placed after this
+# header would silently become Windows-only (TOML sub-table scoping).
+[tool.cibuildwheel.windows]
+before-build = "pip install delvewheel==1.13.0"
+repair-wheel-command = "delvewheel repair -w {dest_dir} {wheel} --add-dll msvcp140.dll;vcruntime140_threads.dll"
