@@ -753,15 +753,44 @@ In `pyproject.toml`'s `[tool.cibuildwheel]` section, add:
 # unless named, which is why --add-dll is required rather than optional.
 # Static CRT is not an option: the prebuilt ExecuTorch .libs are /MD.
 #
+# build-verbosity is GLOBAL on purpose: without it the CMake log is swallowed and the
+# POST_BUILD guards' STATUS lines never appear in CI -- wanted on every leg, not just Windows.
+build-verbosity = 1
+```
+
+Then, as a **nested sub-table** — not flat suffixed keys:
+
+```toml
+# cibuildwheel does NOT repair Windows wheels by default -- there is no auditwheel there.
+# _core is C++ and imports MSVCP140.dll + VCRUNTIME140_THREADS.dll, neither of which ships
+# with CPython, so a machine without the VC++ Redistributable fails to import with an opaque
+# DLL-load error. delvewheel treats System32-resolved DLLs as system libraries and skips them
+# unless named, which is why --add-dll is required rather than optional.
+# Static CRT is not an option: the prebuilt ExecuTorch .libs are /MD.
+#
 # delvewheel is PINNED on purpose. It decides which DLLs land in the shipped wheel, so an
 # unpinned upgrade could silently change the wheel's contents -- in a project that pins its
 # runtime tarball by SHA256 and attests it in CI, an unpinned wheel-repair tool would be the
 # loosest link in the chain. Bump procedure: raise the pin deliberately, then re-run the
-# Step 3 assertion below to confirm both CRT DLLs are still vendored under the new version.
-before-build-windows = "pip install delvewheel==1.13.0"
-repair-wheel-command-windows = "delvewheel repair -w {dest_dir} {wheel} --add-dll msvcp140.dll;vcruntime140_threads.dll"
-build-verbosity = 1
+# Step 4 assertion below to confirm both CRT DLLs are still vendored under the new version.
+[tool.cibuildwheel.windows]
+before-build = "pip install delvewheel==1.13.0"
+repair-wheel-command = "delvewheel repair -w {dest_dir} {wheel} --add-dll msvcp140.dll;vcruntime140_threads.dll"
 ```
+
+**The nested-table form is mandatory — do not use flat `before-build-windows` keys.** Verified
+against the pinned `cibuildwheel==4.1.0`'s own `resources/cibuildwheel.schema.json`: its
+top-level `properties` expose flat OS-suffixed keys **only** for the
+`manylinux-*-image` / `musllinux-*-image` family. `before-build-windows` is not a key at all.
+Per-platform overrides live in the `windows` / `linux` / `macos` sub-tables, each
+`additionalProperties: false`.
+
+This matters more than a syntax nit: cibuildwheel validates `[tool.cibuildwheel]` **once,
+regardless of runner OS**, so an invalid key here fails **every** leg — including the Linux
+ones that were previously green. A first attempt at this task did exactly that.
+
+Leave the Linux `repair-wheel-command` alone — there isn't one, and that is correct: it relies
+on cibuildwheel's stock `auditwheel repair` default, which must not gain `--strip`.
 
 `1.13.0` is the current release (2026-05-28). If a newer one exists when you implement this, use it and say so in the report — the point is that the version is *chosen and recorded*, not that it is frozen forever.
 
@@ -812,9 +841,47 @@ on:
   workflow_dispatch:
 ```
 
-- [ ] **Step 5: Push, trigger, and read the real CI run**
+- [ ] **Step 5: Validate the config with a LOCAL Linux build — BEFORE pushing**
 
-This task **cannot be verified locally** — there is no Windows host in the loop, and winbox cannot answer the question anyway (it has Visual Studio; see the facts section). CI is the only evidence.
+**Do not skip this and do not push first.** cibuildwheel validates `[tool.cibuildwheel]` **once,
+regardless of platform**, so a structural config error fails every leg — and a local Linux run
+catches it in seconds instead of burning a CI round-trip. A first attempt at this task pushed a
+malformed key straight to CI and took down the Windows leg *and* both previously-green Linux
+legs; the local run below would have caught it before the push.
+
+`build/` must be EMPTY first — the CMake cache is path-sensitive:
+
+```bash
+rm -rf build wheelhouse
+uvx cibuildwheel --platform linux 2>&1 | tail -30
+```
+
+What this proves, and what it cannot:
+
+| Proves | Cannot prove |
+|---|---|
+| The TOML parses and every key is valid **for this pinned cibuildwheel version** | Anything Windows-specific |
+| The Windows sub-table doesn't break the Linux legs | That delvewheel vendors correctly |
+| Linux wheels still build and their tests pass | That MSVC resolves |
+
+Expected: Linux wheels build and pass. **Any `Option '...' not supported in a config file` error
+means the config is structurally wrong — fix it here, not in CI.**
+
+Then confirm the Linux wheel is still repaired and traceable (the USDT probes must survive, as before):
+
+```bash
+for whl in wheelhouse/*.whl; do
+  tmp="$(mktemp -d)"; unzip -q "$whl" -d "$tmp"
+  so="$(find "$tmp" -name '_core*.so' -print -quit)"
+  echo "== $whl"; bash scripts/check-usdt-notes.sh --expect on "$so"
+done
+```
+Expected: `USDT probe contract OK` per wheel. If this regressed, your `pyproject.toml` change
+disturbed the Linux repair path — fix before pushing.
+
+- [ ] **Step 6: Push, trigger, and read the real CI run**
+
+Only after Step 5 is green. The **Windows** half of this task cannot be verified locally — there is no Windows host in the loop, and winbox cannot answer the question anyway (it has Visual Studio; see the facts section). CI is the only evidence for Windows.
 
 ```bash
 git push -u origin feature/windows-wheels
@@ -833,7 +900,7 @@ Then report, from the real log:
 5. Did the test suite pass, and did the quantized/LSTM tests **skip** rather than fail?
 6. Did delvewheel vendor both DLLs (Step 3's assertion)?
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add .github/workflows/build-wheels.yml pyproject.toml
