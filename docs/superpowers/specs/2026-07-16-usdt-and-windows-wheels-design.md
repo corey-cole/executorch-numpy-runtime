@@ -345,6 +345,37 @@ So the verification is split, and neither half is skipped:
 
 Do **not** report "verified on Windows" on the strength of a runner-side import.
 
+### 5.9a Deferred follow-up — scope `optimized_native_cpu_ops_lib` for Windows
+
+**Status: deferred until the Windows wheel ships.** Logged 2026-07-17.
+
+The Windows wheel links `portable_ops_lib` for its aten coverage because the core-only tarball
+has no `optimized_native_cpu_ops_lib`. That works, but it is strictly the slower path: on Linux,
+`optimized_native_cpu_ops_lib` registers the same aten set using **optimized** kernels where
+available and falling back to portable only where they aren't. Windows therefore runs portable
+kernels for every non-XNNPACK-delegated op.
+
+**The follow-up:** scope shipping `optimized_native_cpu_ops_lib` (and, separately,
+`quantized_ops_lib`) in the upstream `executorch-runtime-dist` windows-x86_64 tarball. That is an
+upstream artifact change, not a change here.
+
+**What lands here for free if it ships:** §5.3's capability contract is already
+`if(TARGET ...)`-driven, so the new libs would be linked and advertised automatically, and §5.4's
+capability-driven test skips would simply start running the quantized tests with no edit. That is
+the entire reason those were built capability-driven rather than platform-driven.
+
+**One thing that would NOT be automatic — do not miss it.** The `portable_ops_lib` link is in the
+`else()` branch of `if(TARGET optimized_native_cpu_ops_lib)` **deliberately**: linking both
+registers every aten op twice → `Error::RegistrationAlreadyRegistered` (0x16), and
+`register_kernels()` is documented *"Panics on error"* since it runs at static init, so the module
+would abort on import. The `else()` already handles this correctly — but anyone tempted to
+"simplify" the branch while adding the new libs would break Linux and Windows alike.
+
+Also revisit `kernel_libs` semantics at that point: `portable` is currently advertised
+unconditionally because portable coverage genuinely exists on both platforms — just via different
+libraries. If Windows gains `optimized`, that stays true, but it is worth re-reading the contract
+rather than assuming.
+
 ### 5.10 Not adopted from scikit-learn
 
 Recorded so the reference isn't re-litigated later:
