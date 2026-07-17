@@ -106,6 +106,11 @@ message(STATUS "etnp: kernel libs linked = ${_etnp_kernel_libs_str}")
 # The nm-guard counts one codegen registrar TU per codegen'd ops lib actually linked. Derive it
 # from the link line rather than hardcoding 2, which was only right while both libs were always
 # present.
+# Count only the codegen'd ops libs. portable_ops_lib ALSO emits a
+# _GLOBAL__sub_I_RegisterCodegenUnboxedKernelsEverything.cpp registrar, but it is never linked on
+# a platform where this guard runs (Linux links optimized instead; Windows links portable but the
+# guard is gated off), so counting it here would under-verify only on a hypothetical core-only GNU
+# tarball that does not exist. Revisit if such a tarball ever ships.
 set(_etnp_expect_codegen 0)
 if(TARGET optimized_native_cpu_ops_lib)
   math(EXPR _etnp_expect_codegen "${_etnp_expect_codegen} + 1")
@@ -127,7 +132,9 @@ target_compile_definitions(_core PRIVATE ETNP_KERNEL_LIBS="${_etnp_kernel_libs_s
 # Windows substitutes a RUNTIME assertion instead -- XnnpackBackend must appear in
 # registered_backends() (see the spec's D5 and tests/test_meta_info.py). This is a known,
 # accepted asymmetry, not an oversight.
-if(CMAKE_CXX_COMPILER_ID MATCHES "^(GNU|Clang|AppleClang)$")
+# NOT MSVC excludes clang-cl: it reports CMAKE_CXX_COMPILER_ID=Clang but has no `nm` and emits
+# MSVC-style ??__E initializers rather than _GLOBAL__sub_I_*. CMake sets MSVC=1 for clang-cl too.
+if(CMAKE_CXX_COMPILER_ID MATCHES "^(GNU|Clang|AppleClang)$" AND NOT MSVC)
   add_custom_command(TARGET _core POST_BUILD
     COMMAND ${CMAKE_COMMAND} -DSO=$<TARGET_FILE:_core> -DNM=nm
             "-DEXTRA_TUS=${ETNP_KERNEL_EXPECT_TUS}"
