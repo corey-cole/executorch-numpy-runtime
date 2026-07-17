@@ -6,16 +6,25 @@ on:
   pull_request:
   release:
     types: [published]
+  workflow_dispatch:
 
 jobs:
   build_wheels:
     name: Build wheels on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
+      # A Windows failure must not cancel the Linux legs (and vice versa).
+      fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
           - os: ubuntu-24.04-arm
+          # Pinned, NOT windows-latest: executorch-runtime-dist's build-windows job pins
+          # windows-2022 to produce the .libs we link, so this keeps consumer and producer
+          # toolchains aligned. The MSVC version also measurably changes _core's DLL closure
+          # (VCRUNTIME140_THREADS.dll appears only with newer MSVC), which the delvewheel
+          # --add-dll list below depends on.
+          - os: windows-2022
 
     steps:
       - uses: actions/checkout@v7
@@ -47,6 +56,27 @@ jobs:
             test -n "$so" || { echo "no _core*.so inside $whl"; exit 1; }
             echo "== $whl"
             bash scripts/check-usdt-notes.sh --expect on "$so"
+          done
+
+      - name: Assert the C++ runtime was vendored into the Windows wheel
+        # The ONLY authoritative check that delvewheel did its job. An `import` on the runner
+        # proves nothing: the windows-2022 image ships Visual Studio, so the CRT is in its
+        # System32 and any wheel imports fine there -- the same blind spot winbox has.
+        # delvewheel mangles vendored DLL names (msvcp140-<hash>.dll), so match by prefix.
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          wheels=(wheelhouse/*.whl)
+          test "${#wheels[@]}" -gt 0 || { echo "no wheels in wheelhouse/"; exit 1; }
+          for whl in "${wheels[@]}"; do
+            echo "== $whl"
+            contents="$(unzip -Z1 "$whl")"
+            echo "$contents" | grep -iE 'msvcp140[^/]*\.dll' \
+              || { echo "FAIL: msvcp140 not vendored into $whl"; echo "$contents"; exit 1; }
+            echo "$contents" | grep -iE 'vcruntime140_threads[^/]*\.dll' \
+              || { echo "FAIL: vcruntime140_threads not vendored into $whl"; echo "$contents"; exit 1; }
           done
 
       - uses: actions/upload-artifact@v7

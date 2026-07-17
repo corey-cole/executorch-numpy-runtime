@@ -20,7 +20,7 @@ def runtime_info() -> dict:
         "executorch_version": _core.__et_version__,
         "backends": _core.registered_backends(),
         "operators": _core.operator_names(),
-        "kernel_libs": ["portable", "optimized", "quantized"],
+        "kernel_libs": [s for s in _core.__kernel_libs__.split(",") if s],
         "supported_dtypes": _SUPPORTED_DTYPES,
         "bfloat16": "uint16-passthrough",
     }

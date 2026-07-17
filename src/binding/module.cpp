@@ -96,6 +96,7 @@ struct ErrorClasses {
 
 NB_MODULE(_core, m) {
   m.attr("__et_version__") = ETNP_ET_VERSION;
+  m.attr("__kernel_libs__") = ETNP_KERNEL_LIBS;
 
   // Map etnp::EtException -> the matching executorch_numpy_runtime.errors
   // subclass. Confirmed against the installed nanobind 2.13.0

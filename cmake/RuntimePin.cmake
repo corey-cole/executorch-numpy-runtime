@@ -25,15 +25,28 @@ set(ETNP_RUNTIME_VARIANT "logging" CACHE STRING "Runtime variant: logging (only 
 # pre-set _ETNP_PLATFORM (e.g. -D for a cross-build) to bypass detection.
 if(NOT _ETNP_PLATFORM)
   string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _etnp_arch)
+  # CMAKE_SYSTEM_PROCESSOR is "AMD64" on Windows, "x86_64" on Linux.
   if(_etnp_arch MATCHES "^(x86_64|amd64)$")
-    set(_ETNP_PLATFORM "linux-x86_64")
+    set(_etnp_machine "x86_64")
   elseif(_etnp_arch MATCHES "^(aarch64|arm64)$")
-    set(_ETNP_PLATFORM "linux-aarch64")
+    set(_etnp_machine "aarch64")
   else()
     message(FATAL_ERROR
       "Unsupported target architecture '${CMAKE_SYSTEM_PROCESSOR}' for the ExecuTorch runtime pin; "
       "expected x86_64 or aarch64. Set _ETNP_PLATFORM explicitly to override.")
   endif()
+
+  if(WIN32)
+    set(_etnp_os "windows")
+  elseif(UNIX AND NOT APPLE)
+    set(_etnp_os "linux")
+  else()
+    message(FATAL_ERROR
+      "Unsupported target OS for the ExecuTorch runtime pin (Windows and Linux only). "
+      "Set _ETNP_PLATFORM explicitly to override.")
+  endif()
+
+  set(_ETNP_PLATFORM "${_etnp_os}-${_etnp_machine}")
 endif()
 
 set(ETNP_RUNTIME_URL_logging_linux-x86_64
@@ -43,6 +56,13 @@ set(ETNP_RUNTIME_SHA256_logging_linux-x86_64 "e1c29f4fe7d0e108bfc3a4dc6f0bfb98eb
 set(ETNP_RUNTIME_URL_logging_linux-aarch64
   "https://github.com/measly-java-learning/executorch-runtime-dist/releases/download/v1.3.1-6/executorch-runtime-1.3.1-logging-linux-aarch64.tar.gz")
 set(ETNP_RUNTIME_SHA256_logging_linux-aarch64 "feea21ea4d18673601bc7ce231ede25e19a48a1a0ba67d0b02dd490f6ce11eb5")
+
+# windows-x86_64 ships the `logging` variant ONLY -- there is no bare/devtools Windows build
+# upstream. This tarball is also CORE-ONLY: no optimized/quantized ops libs, no ETNPExtras
+# (and therefore no USDT probes; its BUILDINFO records usdt=n/a).
+set(ETNP_RUNTIME_URL_logging_windows-x86_64
+  "https://github.com/measly-java-learning/executorch-runtime-dist/releases/download/v1.3.1-6/executorch-runtime-1.3.1-logging-windows-x86_64.tar.gz")
+set(ETNP_RUNTIME_SHA256_logging_windows-x86_64 "d2bc1859429fe33940adfd110f75d81bb5bedf3163c919d93d8c63531a967a2e")
 
 # Resolve relative to this file's location (repo-root/cmake/), not the including project's
 # CMAKE_SOURCE_DIR, so both the top-level build and native_tests' standalone

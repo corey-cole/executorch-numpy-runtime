@@ -27,14 +27,21 @@ endforeach()
 # IDENTICAL local-symbol name "_GLOBAL__sub_I_RegisterCodegenUnboxedKernelsEverything.cpp"
 # (confirmed via `nm` on a correct build: two distinct addresses, same symbol text -- see
 # task-final-fixes-report.md for the raw nm output). A plain string(FIND) can't tell "both
-# present" from "only one survived", so count occurrences and require at least 2.
+# present" from "only one survived", so count occurrences instead.
+#
+# EXPECT_CODEGEN is supplied by the caller from the real link line (quantized_ops_lib and
+# optimized_native_cpu_ops_lib each codegen their own registration TU from the same upstream
+# template, so both land under the IDENTICAL local-symbol name -- count, don't string(FIND)).
+if(NOT DEFINED EXPECT_CODEGEN)
+  set(EXPECT_CODEGEN 2)  # back-compat for callers predating the derived count
+endif()
 string(REGEX MATCHALL "_GLOBAL__sub_I_RegisterCodegenUnboxedKernelsEverything\\.cpp"
        _codegen_matches "${_syms}")
 list(LENGTH _codegen_matches _codegen_count)
-if(_codegen_count LESS 2)
+if(_codegen_count LESS ${EXPECT_CODEGEN})
   message(FATAL_ERROR
-    "Expected 2 kernel-registration TUs (quantized_ops_lib + optimized_native_cpu_ops_lib) "
-    "named '_GLOBAL__sub_I_RegisterCodegenUnboxedKernelsEverything.cpp' in ${SO}, found "
+    "Expected ${EXPECT_CODEGEN} kernel-registration TU(s) named "
+    "'_GLOBAL__sub_I_RegisterCodegenUnboxedKernelsEverything.cpp' in ${SO}, found "
     "${_codegen_count}: whole-archive regressed at final link for one of the kernel libs -> "
     "op not found at model-load time.")
 endif()
