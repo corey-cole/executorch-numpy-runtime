@@ -20,10 +20,106 @@
 - Available on **every platform this project ships**, including Windows. The test is not platform-gated.
 - No new `ErrorKind`. Failures reuse the existing hierarchy so `src/binding/module.cpp:123-127`'s translation switch is untouched.
 - After any C++/CMake edit: `rm -rf build && uv pip install -e . --no-build-isolation --reinstall`. The editable install does **not** auto-recompile.
+- **The test fixture must be a Conv2d, not a Linear or an elementwise op.** Delegating is not the same as allocating: on the pinned ExecuTorch a Linear+ReLU lowers to a direct GEMM with statically packed weights and allocates **no** workspace, so a `> 0` assertion built on one fails against a *correct* build. Upstream hit this exactly (`scripts/emit-xnnpack-fixtures.py` in executorch-runtime-dist documents it). No existing fixture in `tests/models/` is a conv.
 
 ---
 
-### Task 1: Core reader and binding
+### Task 1: Conv fixture that actually allocates workspace
+
+**Files:**
+- Modify: `tools/export_fixtures.py`
+- Create: `tests/models/conv.pte` (generated, committed)
+- Modify: `tests/models/README.md`
+
+**Interfaces:**
+- Consumes: nothing from earlier tasks.
+- Produces: `tests/models/conv.pte` — a `Conv2d(3, 8, kernel_size=3, padding=1)` followed by `relu`, taking one float32 input of shape `(1, 3, 16, 16)`. Tasks 2 and 3 load this fixture and no other.
+
+Dimensions mirror executorch-runtime-dist's `scripts/emit-xnnpack-fixtures.py` (`C_IN=3`, `C_OUT=8`, `DIM=16`) so both projects assert against the same shape of workload.
+
+> **Environment note:** fixture generation runs in the **separate** export env that has `executorch==1.3.1` + torch (CPU) + `flatc` on PATH — never the runtime env. Torch must not enter this project's dependencies.
+
+- [ ] **Step 1: Add the model to the export script**
+
+In `tools/export_fixtures.py`, add a module definition beside the existing ones:
+
+```python
+class ConvRelu(torch.nn.Module):
+    """Conv2d+ReLU, chosen deliberately over Linear+ReLU.
+
+    Both delegate to XNNPACK, but a Linear lowers to a direct GEMM with statically
+    packed weights and allocates NO workspace arena. Only an op that grows the arena
+    in xnn_create_runtime_v4 -- a conv does -- makes a workspace-size assertion
+    meaningful rather than vacuously zero.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.conv = torch.nn.Conv2d(3, 8, kernel_size=3, padding=1)
+
+    def forward(self, x):
+        return torch.relu(self.conv(x))
+```
+
+and inside `main()`, beside the other `_save` calls:
+
+```python
+    _save("conv.pte", ConvRelu(), (torch.randn(1, 3, 16, 16),), out, xnn)
+```
+
+- [ ] **Step 2: Assert the delegate was actually applied**
+
+A partitioner that silently declined every node still produces a valid `.pte` — one that allocates no workspace, which is precisely the vacuous pass this fixture exists to prevent. After the `_save` call above, add:
+
+```python
+    if b"XnnpackBackend" not in (out / "conv.pte").read_bytes():
+        raise SystemExit("conv.pte contains no XnnpackBackend delegate")
+```
+
+- [ ] **Step 3: Generate the fixture**
+
+Run from the separate export env (substitute your own path):
+
+```bash
+/path/to/et-venv/bin/python tools/export_fixtures.py tests/models
+```
+
+Expected: `wrote conv.pte` (or equivalent) with no `SystemExit`.
+
+- [ ] **Step 4: Verify the fixture delegates**
+
+```bash
+grep -c XnnpackBackend tests/models/conv.pte
+```
+
+Expected: `1`.
+
+- [ ] **Step 5: Confirm it allocates workspace — the whole point of this task**
+
+This cannot be checked until the reader exists (Task 2), and Task 2's test is what checks it. Record the dependency and move on: if Task 2's `> 0` assertion fails against a correct build, **this fixture is the suspect**, not the reader. Escalate to a larger conv (raise `DIM` to 32) rather than weakening the assertion to `>= 0`.
+
+- [ ] **Step 6: Document the fixture**
+
+Add a row to `tests/models/README.md` describing `conv.pte`: *"Conv2d(3,8,k3,p1)+ReLU, input (1,3,16,16), XNNPACK-delegated. Exists specifically to allocate an XNNPACK workspace arena — a Linear would delegate but allocate nothing."*
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add tools/export_fixtures.py tests/models/conv.pte tests/models/README.md
+git commit -m "test: add a conv fixture that allocates XNNPACK workspace
+
+Delegating and allocating are different properties. On the pinned
+ExecuTorch a Linear+ReLU delegates but lowers to a direct GEMM with
+statically packed weights and grows no arena, so a workspace-size
+assertion built on one would fail against a correct build. A conv grows
+the arena in xnn_create_runtime_v4.
+
+Dims mirror executorch-runtime-dist's emit-xnnpack-fixtures.py."
+```
+
+---
+
+### Task 2: Core reader and binding
 
 **Files:**
 - Modify: `src/et_core/et_core.h` (declaration beside `registered_backends()`/`operator_names()`, currently lines 93-95)
@@ -32,8 +128,8 @@
 - Test: `tests/test_workspace_size.py`
 
 **Interfaces:**
-- Consumes: nothing from earlier tasks.
-- Produces: `int etnp::xnnpack_workspace_size_bytes()` in C++, exposed to Python as `_core.xnnpack_workspace_size_bytes() -> int`. Task 2 wraps this in the public package namespace.
+- Consumes: `tests/models/conv.pte` from Task 1.
+- Produces: `int etnp::xnnpack_workspace_size_bytes()` in C++, exposed to Python as `_core.xnnpack_workspace_size_bytes() -> int`. Task 3 wraps this in the public package namespace.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -52,14 +148,18 @@ def test_workspace_size_grows_after_delegated_load():
     that includes allocator alignment padding, so it is not stable across runs or
     platforms. It is also process-wide, which is why this asserts ">0 after" rather
     than an exact delta -- another test in this process may already have grown the arena.
+
+    Uses conv.pte and not add.pte: an elementwise add or a Linear delegates to XNNPACK
+    but allocates no workspace arena, so this assertion would fail against a correct
+    build. Only a conv grows the arena.
     """
-    rt = _core.load_path(model_or_skip("add.pte"))
-    rt.run_method("forward", [np.ones(3, np.float32), np.ones(3, np.float32)])
+    rt = _core.load_path(model_or_skip("conv.pte"))
+    rt.run_method("forward", [np.ones((1, 3, 16, 16), np.float32)])
 
     assert _core.xnnpack_workspace_size_bytes() > 0
 ```
 
-`add.pte` is XNNPACK-delegated (`grep -c XnnpackBackend tests/models/add.pte` → `1`) and takes two float32 tensors of shape `(3,)`; the call shape above matches `tests/test_forward.py`.
+`conv.pte` comes from Task 1 and is XNNPACK-delegated (`grep -c XnnpackBackend tests/models/conv.pte` → `1`). The `run_method` call shape matches `tests/test_forward.py`.
 
 - [ ] **Step 2: Run the test to verify it fails**
 
@@ -175,7 +275,7 @@ Run: `python -m pytest tests/test_workspace_size.py -v`
 
 Expected: PASS.
 
-If it fails with `assert 0 > 0`, the fixture did not actually delegate. Confirm with `grep -c XnnpackBackend tests/models/add.pte` (expected: `1`) before assuming the reader is wrong.
+If it fails with `assert 0 > 0`, the reader is probably fine and the **fixture** is the suspect — the arena was never grown. Confirm the delegate is present (`grep -c XnnpackBackend tests/models/conv.pte` → `1`), then escalate the conv in Task 1 (raise `DIM` from 16 to 32) rather than weakening the assertion.
 
 - [ ] **Step 9: Commit**
 
@@ -195,7 +295,7 @@ translation switch is untouched."
 
 ---
 
-### Task 2: Python surface and the zero-before-load guarantee
+### Task 3: Python surface and the zero-before-load guarantee
 
 **Files:**
 - Modify: `executorch_numpy_runtime/info.py`
@@ -203,7 +303,7 @@ translation switch is untouched."
 - Test: `tests/test_workspace_size.py` (extend)
 
 **Interfaces:**
-- Consumes: `_core.xnnpack_workspace_size_bytes() -> int` from Task 1.
+- Consumes: `_core.xnnpack_workspace_size_bytes() -> int` from Task 2, and `tests/models/conv.pte` from Task 1.
 - Produces: `executorch_numpy_runtime.xnnpack_workspace_size_bytes() -> int`, re-exported in `__all__`.
 
 - [ ] **Step 1: Write the failing subprocess test**
@@ -291,8 +391,8 @@ A test that would pass without its own process is a test that will rot. Verify t
 python -c "
 import numpy as np, executorch_numpy_runtime as en
 print('cold:', en.xnnpack_workspace_size_bytes())
-p = en.Runtime.get().load_program('tests/models/add.pte')
-p.forward(np.ones(3, dtype=np.float32), np.ones(3, dtype=np.float32))
+p = en.Runtime.get().load_program('tests/models/conv.pte')
+p.load_method('forward')([np.ones((1,3,16,16), dtype=np.float32)])
 print('warm:', en.xnnpack_workspace_size_bytes())
 "
 ```
@@ -325,14 +425,14 @@ pytest process would invalidate the assertion silently."
 
 ---
 
-### Task 3: Documentation and gate sweep
+### Task 4: Documentation and gate sweep
 
 **Files:**
 - Modify: `CLAUDE.md` (new subsection under Architecture)
 - Modify: `README.md` (API surface listing)
 
 **Interfaces:**
-- Consumes: everything from Tasks 1-2.
+- Consumes: everything from Tasks 1-3.
 - Produces: no new interfaces.
 
 - [ ] **Step 1: Document the metric in CLAUDE.md**
