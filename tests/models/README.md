@@ -19,3 +19,9 @@ upstream release asset** and are documented here for traceability.
 - Consumed by `tests/test_lstm_smoke.py`. Vendored (not FetchContent-pinned)
   because a test fixture cannot compromise a consumer; the recorded SHA256 is the
   provenance trace back to the attested asset.
+
+## Conv+ReLU (`conv.pte`)
+
+- Conv2d(3,8,k3,p1)+ReLU, input (1,3,16,16), XNNPACK-delegated. Exists
+  specifically to allocate an XNNPACK workspace arena — a Linear would delegate
+  but allocate nothing.

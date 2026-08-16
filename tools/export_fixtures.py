@@ -42,10 +42,30 @@ class Lin(torch.nn.Module):
     def forward(self, x): return self.l(x)
 
 
+class ConvRelu(torch.nn.Module):
+    """Conv2d+ReLU, chosen deliberately over Linear+ReLU.
+
+    Both delegate to XNNPACK, but a Linear lowers to a direct GEMM with statically
+    packed weights and allocates NO workspace arena. Only an op that grows the arena
+    in xnn_create_runtime_v4 -- a conv does -- makes a workspace-size assertion
+    meaningful rather than vacuously zero.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.conv = torch.nn.Conv2d(3, 8, kernel_size=3, padding=1)
+
+    def forward(self, x):
+        return torch.relu(self.conv(x))
+
+
 def main(out):
     out = Path(out); out.mkdir(parents=True, exist_ok=True)
     xnn = [XnnpackPartitioner()]
     _save("add.pte", Add(), (torch.ones(3), torch.ones(3)), out, xnn)
+    _save("conv.pte", ConvRelu(), (torch.randn(1, 3, 16, 16),), out, xnn)
+    if b"XnnpackBackend" not in (out / "conv.pte").read_bytes():
+        raise SystemExit("conv.pte contains no XnnpackBackend delegate")
     _save("dtypes.pte", MixedDtypes(),
           (torch.ones(1, dtype=torch.int64), torch.ones(1)), out)  # portable, no xnn
     # multi-method: export both forward and double

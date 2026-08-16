@@ -60,6 +60,8 @@ Three layers, bottom-up:
 
 **Outputs are always fresh copies**, never views into runtime memory.
 
+**XNNPACK workspace size:** `xnnpack_workspace_size_bytes()` reports the delegate's arena size for host-side native-memory accounting. It reads a **read-only** backend option (`XnnpackBackend` / `workspace_size_bytes`) that is a **vendored patch in executorch-runtime-dist**, not upstream ExecuTorch — this will not build against a stock ExecuTorch, and the feature disappears if this project ever stops consuming these tarballs. The value is `0` until the first XNNPACK-delegated method loads (lazy arena creation), process-wide (`EXECUTORCH_XNNPACK_SHARED_WORKSPACE=ON`, so never sum it), and a high-water mark including alignment padding. Requires runtime v1.3.1-10+.
+
 **bfloat16:** surfaced as raw `uint16` bits (numpy has no native bf16); `uint16` inputs are interpreted as bf16. The `[bf16]` extra adds `ml_dtypes` for a real dtype.
 
 ## Build-time guards (these fail the *build*, not runtime)

@@ -94,5 +94,10 @@ bool backend_available(const std::string& name);
 std::vector<std::string> registered_backends();
 std::vector<std::string> operator_names();
 
+// XNNPACK workspace arena size in bytes (process-wide high-water mark).
+// Zero until the first XNNPACK-delegated method loads -- the arena is created
+// lazily during delegate init, so a zero here is correct, not a broken read.
+int xnnpack_workspace_size_bytes();
+
 }  // namespace etnp
 #endif
