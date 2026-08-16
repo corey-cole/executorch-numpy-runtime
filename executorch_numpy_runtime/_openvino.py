@@ -70,3 +70,38 @@ def ensure_openvino_lib_path(runtime) -> None:
         return
 
     os.environ[_ENV] = _wheel_lib_path()
+
+
+def openvino_inference_precision() -> str:
+    """Precision OpenVINO will use for CPU inference on this host, e.g. "f32" or "bf16".
+
+    OpenVINO selects this from the CPU it lands on, at import time rather than when the
+    blob was compiled: on avx512_bf16/AMX hardware it computes in bf16, elsewhere f32.
+    Both are correct, and the difference is ~2.5e-3 versus ~6e-8 against an f32 golden --
+    which is why fixture parity uses atol=1e-2. This function exists so that looseness
+    stays observable instead of hiding a silent shift to bf16.
+
+    CAVEAT: this reports what a freshly-created ov::Core would choose on this host, not a
+    reading from the Core the delegate built inside OpenvinoBackend. Those agree today
+    because the choice is derived from CPU capability alone. If per-model precision
+    control is ever added (see the issue tracking it), they could diverge and this would
+    need to read through the delegate instead.
+
+    Raises BackendNotAvailable if the openvino package is not installed.
+    """
+    from .errors import BackendNotAvailable
+
+    try:
+        import openvino
+    except ImportError as exc:
+        raise BackendNotAvailable(
+            "Reading the OpenVINO inference precision requires the 'openvino' package. "
+            'Install it with: pip install "executorch-numpy-runtime[openvino]"'
+        ) from exc
+
+    # get_property returns an ov::Type object, not a str. str() of that object renders
+    # as "<Type: 'float32'>", so read get_type_name() instead: it returns the bare,
+    # stable name ("f32"/"bf16") this function exists to report.
+    return (
+        openvino.Core().get_property("CPU", "INFERENCE_PRECISION_HINT").get_type_name()
+    )

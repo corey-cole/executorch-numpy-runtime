@@ -91,3 +91,17 @@ def test_non_openvino_program_never_touches_the_env():
     )
     assert proc.returncode == 0, proc.stderr
     assert "ok" in proc.stdout
+
+
+@pytest.mark.requires_backend("OpenvinoBackend")
+def test_inference_precision_is_reported():
+    """Users need to know whether they are silently getting bf16.
+
+    The value is whatever OpenVINO chose for this CPU -- f32 on most hardware, bf16 on
+    avx512_bf16/AMX machines -- so this asserts it is a non-empty string rather than a
+    particular value. Asserting a value would assert which machine ran the test.
+    """
+    import executorch_numpy_runtime as en
+
+    precision = en.openvino_inference_precision()
+    assert isinstance(precision, str) and precision, repr(precision)
