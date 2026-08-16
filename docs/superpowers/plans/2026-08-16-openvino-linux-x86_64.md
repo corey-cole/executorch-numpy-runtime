@@ -860,9 +860,11 @@ ordinary exception."
 
 ---
 
-### Task 6: Parity test, CI, and documentation
+### Task 6: Precision reporting, parity test, CI, and documentation
 
 **Files:**
+- Modify: `executorch_numpy_runtime/_openvino.py`
+- Modify: `executorch_numpy_runtime/__init__.py`
 - Test: `tests/test_openvino_parity.py`
 - Modify: `.github/workflows/qa-gate.yml`
 - Modify: `pyproject.toml` (`test-extras`)
@@ -870,9 +872,111 @@ ordinary exception."
 
 **Interfaces:**
 - Consumes: everything from Tasks 1-5.
-- Produces: no new interfaces.
+- Produces: `executorch_numpy_runtime.openvino_inference_precision() -> str`.
 
-- [ ] **Step 1: Write the parity test**
+- [ ] **Step 1: Write the failing test for the precision read**
+
+Append to `tests/test_openvino_resolution.py`:
+
+```python
+@pytest.mark.requires_backend("OpenvinoBackend")
+def test_inference_precision_is_reported():
+    """Users need to know whether they are silently getting bf16.
+
+    The value is whatever OpenVINO chose for this CPU -- f32 on most hardware, bf16 on
+    avx512_bf16/AMX machines -- so this asserts it is a non-empty string rather than a
+    particular value. Asserting a value would assert which machine ran the test.
+    """
+    import executorch_numpy_runtime as en
+
+    precision = en.openvino_inference_precision()
+    assert isinstance(precision, str) and precision, repr(precision)
+```
+
+- [ ] **Step 2: Run to verify it fails**
+
+Run: `python -m pytest tests/test_openvino_resolution.py -k inference_precision -v`
+
+Expected: FAIL with `AttributeError: module 'executorch_numpy_runtime' has no attribute 'openvino_inference_precision'`.
+
+- [ ] **Step 3: Implement the precision read**
+
+Append to `executorch_numpy_runtime/_openvino.py`:
+
+```python
+def openvino_inference_precision() -> str:
+    """Precision OpenVINO will use for CPU inference on this host, e.g. "f32" or "bf16".
+
+    OpenVINO selects this from the CPU it lands on, at import time rather than when the
+    blob was compiled: on avx512_bf16/AMX hardware it computes in bf16, elsewhere f32.
+    Both are correct, and the difference is ~2.5e-3 versus ~6e-8 against an f32 golden --
+    which is why fixture parity uses atol=1e-2. This function exists so that looseness
+    stays observable instead of hiding a silent shift to bf16.
+
+    CAVEAT: this reports what a freshly-created ov::Core would choose on this host, not a
+    reading from the Core the delegate built inside OpenvinoBackend. Those agree today
+    because the choice is derived from CPU capability alone. If per-model precision
+    control is ever added (see the issue tracking it), they could diverge and this would
+    need to read through the delegate instead.
+
+    Raises BackendNotAvailable if the openvino package is not installed.
+    """
+    from .errors import BackendNotAvailable
+
+    try:
+        import openvino
+    except ImportError as exc:
+        raise BackendNotAvailable(
+            "Reading the OpenVINO inference precision requires the 'openvino' package. "
+            'Install it with: pip install "executorch-numpy-runtime[openvino]"'
+        ) from exc
+
+    # get_property returns an OpenVINO type object, not a str; str() it at the boundary so
+    # callers get a stable, printable value. Verify the exact repr on first run and adjust
+    # the docstring's examples if it differs from "f32"/"bf16".
+    return str(openvino.Core().get_property("CPU", "INFERENCE_PRECISION_HINT"))
+```
+
+- [ ] **Step 4: Export it**
+
+In `executorch_numpy_runtime/__init__.py`, add the import beside the existing ones:
+
+```python
+from ._openvino import openvino_inference_precision
+```
+
+and `"openvino_inference_precision",` to `__all__`.
+
+- [ ] **Step 5: Run to verify it passes**
+
+Run: `python -m pytest tests/test_openvino_resolution.py -k inference_precision -v -s`
+
+Expected: PASS on linux-x86_64 with the extra installed; SKIP elsewhere.
+
+Then eyeball the actual value, because the docstring claims a format:
+
+```bash
+python -c "import executorch_numpy_runtime as en; print(repr(en.openvino_inference_precision()))"
+```
+
+Expected: something like `'f32'`. If the repr is an object-ish string rather than a bare precision name, fix the docstring's examples to match reality rather than leaving them aspirational.
+
+- [ ] **Step 6: Commit the precision read**
+
+```bash
+git add executorch_numpy_runtime/_openvino.py executorch_numpy_runtime/__init__.py tests/test_openvino_resolution.py
+git commit -m "feat: report the OpenVINO inference precision
+
+atol=1e-2 on fixture parity is set by the worst precision OpenVINO may
+legitimately pick, and a bound that loose cannot distinguish 'correct in
+bf16' from 'quietly degraded'. Exposing the precision keeps that
+observable rather than implicit.
+
+Reads what a fresh Core would choose on this host, not the delegate's own
+Core -- equivalent today because the choice derives from CPU capability."
+```
+
+- [ ] **Step 7: Write the parity test**
 
 Create `tests/test_openvino_parity.py`:
 
@@ -914,13 +1018,9 @@ def test_openvino_fixture_matches_eager_golden(capsys):
     out = method([x])[0].reshape(-1)
 
     # Report the precision actually used. atol=1e-2 alone cannot distinguish "correct in
-    # bf16" from "quietly degraded", so record which one this run saw. Querying the pip
-    # wheel is correct here (unlike upstream, where the wheel is a DIFFERENT OpenVINO than
-    # the bundle under test) because the wheel IS the runtime we dlopen.
+    # bf16" from "quietly degraded", so record which one this run saw.
     try:
-        import openvino
-
-        precision = openvino.Core().get_property("CPU", "INFERENCE_PRECISION_HINT")
+        precision = en.openvino_inference_precision()
     except Exception as exc:  # noqa: BLE001 - diagnostic only, never fails the test
         precision = f"(unavailable: {exc})"
 
@@ -931,7 +1031,7 @@ def test_openvino_fixture_matches_eager_golden(capsys):
     np.testing.assert_allclose(out, golden, atol=1e-2, rtol=0)
 ```
 
-- [ ] **Step 2: Run it**
+- [ ] **Step 8: Run it**
 
 Run: `python -m pytest tests/test_openvino_parity.py -v -s`
 
@@ -939,7 +1039,7 @@ Expected on linux-x86_64 with the extra installed: PASS, printing `ov PRECISION 
 
 If `openvino` is not installed locally: `uv pip install "openvino==2025.4.1"` first.
 
-- [ ] **Step 3: Verify the tolerance is not vacuous**
+- [ ] **Step 9: Verify the tolerance is not vacuous**
 
 Confirm the test can actually fail, so a broken delegate would be caught:
 
@@ -956,7 +1056,7 @@ print('zeros would differ by:', np.max(np.abs(np.zeros_like(g) - g)))
 
 Expected: the zeros case differs by far more than 1e-2, confirming the bound still catches a dead delegate.
 
-- [ ] **Step 4: Wire CI**
+- [ ] **Step 10: Wire CI**
 
 In `.github/workflows/qa-gate.yml`, add after the existing test steps:
 
@@ -980,7 +1080,7 @@ In `.github/workflows/qa-gate.yml`, add after the existing test steps:
 
 Both matrix legs now assert something real: x86_64 executes a delegated model, aarch64 asserts the platform error rather than merely skipping.
 
-- [ ] **Step 5: Wire the wheel test leg**
+- [ ] **Step 11: Wire the wheel test leg**
 
 In `pyproject.toml`, under `[tool.cibuildwheel]`, beside `test-requires`:
 
@@ -995,7 +1095,7 @@ test-extras = ["openvino"]
 > header silently becomes Windows-only (TOML sub-table scoping) — the file already warns
 > about this.
 
-- [ ] **Step 6: Measure the wheel-size delta**
+- [ ] **Step 12: Measure the wheel-size delta**
 
 ```bash
 rm -rf build && uvx cibuildwheel --platform linux
@@ -1004,7 +1104,7 @@ ls -l wheelhouse/*.whl
 
 Compare against the pre-change wheel size (build one from `main` if you don't have it). Expected: an increase consistent with one static archive, not with a vendored OpenVINO runtime. If the wheel grew by tens of MB, something is being bundled that should be `dlopen`ed — investigate before merging.
 
-- [ ] **Step 7: Document it**
+- [ ] **Step 13: Document it**
 
 Add to `CLAUDE.md` after the XNNPACK workspace paragraph:
 
@@ -1012,9 +1112,13 @@ Add to `CLAUDE.md` after the XNNPACK workspace paragraph:
 **OpenVINO delegate:** linked on `linux-x86_64` only (`if(TARGET openvino_backend)` — capability, not platform slug). The delegate `dlopen`s the OpenVINO C API at first use via `OPENVINO_LIB_PATH`, **once**, under `std::call_once` with no retry — so a failed first attempt breaks the process until restart. `Program.__init__` therefore resolves that path lazily (only for programs whose `MethodMeta` reports `OpenvinoBackend`) and a C++ guard in `run_method` refuses an unusable configuration before ExecuTorch is entered. Install with the `[openvino]` extra, pinned to `openvino==2025.4.1` exactly — a `.pte` embeds a precompiled blob. Fixture parity uses `atol=1e-2` because OpenVINO picks bf16 or f32 from the host CPU; see `docs/superpowers/specs/2026-08-16-openvino-linux-x86_64-design.md`.
 ```
 
-Add `openvino` to the extras list in `README.md` beside `bf16`, with a one-line description and the linux-x86_64 caveat.
+Add `openvino` to the extras list in `README.md` beside `bf16`, with a one-line description and the linux-x86_64 caveat, and add `openvino_inference_precision()` to the public-API listing beside `xnnpack_workspace_size_bytes()`.
 
-- [ ] **Step 8: Full sweep**
+In the `CLAUDE.md` paragraph above, append: *"`openvino_inference_precision()` reports "
+whether this host runs bf16 or f32, which is what keeps the deliberately loose parity "
+tolerance observable. Controlling precision is NOT supported — see the tracking issue."*
+
+- [ ] **Step 14: Full sweep**
 
 ```bash
 python -m pytest tests/ -q
@@ -1026,7 +1130,7 @@ ASAN_OPTIONS=detect_leaks=1 ./build/leak/leak_harness tests/models/add.pte 500
 
 Expected: all clean, two by-design skips.
 
-- [ ] **Step 9: Commit and open the PR**
+- [ ] **Step 15: Commit and open the PR**
 
 ```bash
 git add tests/test_openvino_parity.py .github/workflows/qa-gate.yml pyproject.toml CLAUDE.md README.md
@@ -1040,7 +1144,7 @@ git push -u origin feature/openvino-linux-x86_64
 gh pr create --fill
 ```
 
-- [ ] **Step 10: Confirm CI**
+- [ ] **Step 16: Confirm CI**
 
 ```bash
 gh pr checks --watch
