@@ -50,6 +50,25 @@ target_link_libraries(_core PRIVATE
   executorch xnnpack_backend
   extension_module_static extension_data_loader extension_tensor)
 
+# OpenVINO delegate: present in the linux-x86_64 tarball only. Keyed on the TARGET rather
+# than on _ETNP_PLATFORM so a platform that later gains the delegate works with no edit --
+# the same capability-driven philosophy conftest.py documents for requires_kernel_lib.
+#
+# Deliberately NOT added to the required-target loop above: that loop catches
+# find_package(ExecuTorch) early-returning and producing an empty link line. A target that
+# legitimately does not exist on two of three platforms would convert that guard into a
+# platform conditional and weaken it.
+#
+# The delegate dlopens the OpenVINO C API at first use via OPENVINO_LIB_PATH; nothing
+# links against OpenVINO here, so the wheel gains only this static archive.
+if(TARGET openvino_backend)
+  target_link_libraries(_core PRIVATE openvino_backend)
+  list(APPEND ETNP_KERNEL_EXPECT_TUS "_GLOBAL__sub_I_OpenvinoBackend.cpp")
+  message(STATUS "etnp: OpenVINO delegate linked")
+else()
+  message(STATUS "etnp: OpenVINO delegate not available in this runtime prefix")
+endif()
+
 # _etnp_kernel_libs is the SINGLE SOURCE OF TRUTH for the advertised kernel set. Every APPEND
 # below must come before the JOIN at the bottom of this block.
 # "portable" is unconditional because portable aten coverage exists on every platform -- but it

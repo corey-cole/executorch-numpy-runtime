@@ -1,3 +1,8 @@
+import platform
+import sys
+
+import pytest
+
 from executorch_numpy_runtime import _core
 from conftest import model_or_skip
 
@@ -42,3 +47,17 @@ def test_method_meta_does_not_initialize_delegates():
     proc = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True)
     assert proc.returncode == 0, proc.stderr
     assert "ok" in proc.stdout
+
+
+_IS_LINUX_X86_64 = sys.platform == "linux" and platform.machine() == "x86_64"
+
+
+@pytest.mark.skipif(not _IS_LINUX_X86_64, reason="OpenVINO delegate ships on linux-x86_64 only")
+def test_openvino_backend_is_registered_on_linux_x86_64():
+    """The delegate ships in the linux-x86_64 tarball; linking it must register it.
+
+    Platform-conditional rather than capability-conditional on purpose: this is the one
+    test that must FAIL if the link is dropped. A requires_backend marker would skip
+    instead, turning a regression into a silent pass.
+    """
+    assert "OpenvinoBackend" in _core.registered_backends()
