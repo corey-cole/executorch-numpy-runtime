@@ -19,6 +19,12 @@ def pytest_configure(config):
         "Capability-driven, not platform-driven: if a platform later gains the kernel lib, "
         "the test starts running with no edit.",
     )
+    config.addinivalue_line(
+        "markers",
+        "requires_backend(name): skip unless <name> is in runtime_info()['backends']. "
+        "Capability-driven, not platform-driven: a platform that later gains the backend "
+        "starts running these tests with no edit.",
+    )
 
 
 def pytest_collection_modifyitems(config, items):
@@ -31,5 +37,17 @@ def pytest_collection_modifyitems(config, items):
                     pytest.mark.skip(
                         reason=f"kernel lib {required!r} not linked in this build "
                         f"(linked: {sorted(linked)})"
+                    )
+                )
+
+    backends = set(runtime_info()["backends"])
+    for item in items:
+        for marker in item.iter_markers(name="requires_backend"):
+            required = marker.args[0]
+            if required not in backends:
+                item.add_marker(
+                    pytest.mark.skip(
+                        reason=f"backend {required!r} not linked in this build "
+                        f"(linked: {sorted(backends)})"
                     )
                 )

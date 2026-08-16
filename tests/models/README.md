@@ -25,3 +25,11 @@ upstream release asset** and are documented here for traceability.
 - Conv2d(3,8,k3,p1)+ReLU, input (1,3,16,16), XNNPACK-delegated. Exists
   specifically to allocate an XNNPACK workspace arena — a Linear would delegate
   but allocate nothing.
+
+## OpenVINO (`openvino/`)
+
+- `openvino/` — vendored from the upstream release asset (see
+  `openvino/MANIFEST`). `Linear(8,8)+ReLU` fully delegated to OpenVINO,
+  `CompileSpec(device=CPU)`. `in.bin`/`out.bin` are float32, 8 values each,
+  tensor shape `(1,8)`; `out.bin` is the **eager** golden, so comparisons are
+  tolerance-based (see the spec: `atol=1e-2`).

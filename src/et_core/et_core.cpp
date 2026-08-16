@@ -1,7 +1,11 @@
 #include "et_core/et_core.h"
 
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#ifndef _WIN32
+#include <sys/stat.h>
+#endif
 #include <mutex>
 #include <variant>
 
@@ -145,8 +149,63 @@ MethodMeta Runtime::method_meta(const std::string& name) const {
   return out;
 }
 
+// Uses MethodMeta::uses_backend (runtime/executor/method_meta.h:257). Same locking
+// rationale as method_meta(): Module::method_meta mutates internal state, so hold
+// exec_mutex to avoid racing execute().
+bool Runtime::method_uses_backend(const std::string& name,
+                                  const std::string& backend) const {
+  std::lock_guard<std::mutex> guard(state_->exec_mutex);
+  auto meta = state_->module->method_meta(name);
+  if (!meta.ok()) {
+    throw EtException({ErrorKind::Load,
+        "Could not read metadata for method '" + name + "'", name});
+  }
+  return meta->uses_backend(backend.c_str());
+}
+
+// Refuses an OpenVINO-delegated method that cannot possibly succeed, BEFORE ExecuTorch is
+// entered. This matters more than a typical precondition check: the delegate resolves the
+// OpenVINO C API with dlopen under std::call_once and never retries, so a failure that
+// reaches it leaves the process permanently broken. Raising here keeps the error ordinary
+// and the interpreter usable.
+//
+// Duplicated by the Python layer (_api.Program), deliberately: _core is importable and
+// bypasses it, and our own test suite uses _core directly.
+static void guard_openvino(const Runtime& rt, const std::string& method) {
+  if (!rt.method_uses_backend(method, "OpenvinoBackend")) return;
+
+  if (!backend_available("OpenvinoBackend")) {
+    throw EtException({ErrorKind::BackendMissing,
+        "This .pte uses the OpenvinoBackend delegate, which this build does not provide. "
+        "The OpenVINO delegate ships on linux-x86_64 only. "
+        "Re-export without the OpenVINO partitioner to run here.",
+        "OpenvinoBackend"});
+  }
+
+  const char* lib = std::getenv("OPENVINO_LIB_PATH");
+  if (lib == nullptr || *lib == '\0') {
+    throw EtException({ErrorKind::BackendMissing,
+        "This .pte uses the OpenvinoBackend delegate, but OPENVINO_LIB_PATH is not set. "
+        "Set it to the FULL PATH OF THE .so FILE (not a directory) before the first "
+        "inference, or install the 'openvino' extra and load through "
+        "executorch_numpy_runtime.Runtime, which resolves it for you.",
+        "OpenvinoBackend"});
+  }
+
+#ifndef _WIN32
+  struct stat st{};
+  if (::stat(lib, &st) != 0 || !S_ISREG(st.st_mode)) {
+    throw EtException({ErrorKind::BackendMissing,
+        std::string("OPENVINO_LIB_PATH does not name a regular file: '") + lib +
+        "'. It must be the full path to libopenvino_c.so, not a directory.",
+        "OpenvinoBackend"});
+  }
+#endif
+}
+
 ForwardResult Runtime::run_method(const std::string& name,
                                    const std::vector<InputDesc>& inputs) {
+  guard_openvino(*this, name);
   std::vector<std::vector<executorch::aten::SizesType>> shapes(inputs.size());
   std::vector<TensorPtr> tensors;
   std::vector<EValue> evalues;

@@ -22,6 +22,11 @@ class Method:
 class Program:
     def __init__(self, runtime: "_core._Runtime"):
         self._rt = runtime
+        # Must run before any load_method: the OpenVINO delegate's dlopen is once-only.
+        # Cheap and import-free for programs that do not use OpenVINO.
+        from ._openvino import ensure_openvino_lib_path
+
+        ensure_openvino_lib_path(runtime)
 
     @property
     def method_names(self) -> list:

@@ -1,0 +1,7 @@
+# Provenance for the vendored OpenVINO fixture. Flat key=value on purpose:
+# scripts/check-pin-rows.sh reads openvino_version from here in bash, and a format
+# needing a parser would split the pin guards across two languages.
+tarball_url=https://github.com/measly-java-learning/executorch-runtime-dist/releases/download/v1.3.1-10/etnp-openvino-fixtures-1.3.1-2025.4.1.tar.gz
+tarball_sha256=ea2306a98354a6831f7d00c0581ad477fa7160e68a836d79bcdeabede435fb0f
+openvino_version=2025.4.1
+executorch_version=1.3.1

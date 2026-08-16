@@ -110,6 +110,9 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
+# ...but tests/models/openvino/MANIFEST is a VENDORED provenance record (not a
+# setuptools-generated file) that scripts/check-pin-rows.sh reads in bash.
+!tests/models/openvino/MANIFEST
 
 # PyInstaller
 #  Usually these files are written by a python script from a template

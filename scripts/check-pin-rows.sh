@@ -54,4 +54,20 @@ done
 grep -q 'ET_RUNTIME_URL_logging_windows-x86_64-static' "$PIN" \
   || echo "check-pin-rows: note: no windows-x86_64-static row in this release" >&2
 
+# The OpenVINO version now lives in three files. They must agree, or a rebuild can install
+# a runtime that cannot import the fixture's precompiled blob.
+ov_pin="$(grep -oE 'set\(ET_RUNTIME_OPENVINO_VERSION "[^"]+"\)' "$PIN" \
+  | grep -oE '"[^"]+"' | tr -d '"')"
+ov_manifest="$(grep -oE '^openvino_version=.*' tests/models/openvino/MANIFEST | cut -d= -f2)"
+ov_pyproject="$(grep -oE 'openvino==[0-9][^";]*' pyproject.toml | head -1 | cut -d= -f3)"
+
+[ -n "$ov_pin" ]       || fail "no ET_RUNTIME_OPENVINO_VERSION in $PIN"
+[ -n "$ov_manifest" ]  || fail "no openvino_version in tests/models/openvino/MANIFEST"
+[ -n "$ov_pyproject" ] || fail "no openvino== pin in pyproject.toml"
+
+[ "$ov_pin" = "$ov_manifest" ] && [ "$ov_pin" = "$ov_pyproject" ] || fail \
+  "OpenVINO version disagreement: pin=$ov_pin manifest=$ov_manifest pyproject=$ov_pyproject"
+
+echo "ok: openvino ${ov_pin} agrees across pin, manifest, and pyproject"
+
 echo "check-pin-rows: OK (release v${version})"
