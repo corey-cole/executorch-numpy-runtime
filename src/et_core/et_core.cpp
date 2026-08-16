@@ -1,12 +1,15 @@
 #include "et_core/et_core.h"
 
+#include <cstdio>
 #include <cstring>
 #include <mutex>
+#include <variant>
 
 #include <executorch/extension/data_loader/buffer_data_loader.h>
 #include <executorch/extension/module/module.h>
 #include <executorch/extension/tensor/tensor.h>
 #include <executorch/runtime/backend/interface.h>
+#include <executorch/runtime/backend/options.h>
 #include <executorch/runtime/executor/method_meta.h>
 #include <executorch/runtime/kernel/operator_registry.h>
 
@@ -259,6 +262,56 @@ std::vector<std::string> operator_names() {
     if (k.name_ != nullptr) out.emplace_back(k.name_);
   }
   return out;
+}
+
+// xnnpack_workspace_size_bytes(): reads the read-only "workspace_size_bytes"
+// option from the XNNPACK delegate via the backend-options API.
+//
+// This option is a VENDORED PATCH in executorch-runtime-dist, not upstream
+// ExecuTorch -- stock ExecuTorch/XNNPACK have no size accessor, so this
+// translation unit will not build against an unpatched ExecuTorch. Upstream
+// applies the patch on every platform it ships (build-runtime.sh, unguarded),
+// so this needs no platform conditional.
+//
+// The two strings are hardcoded deliberately: XNNPACKBackend.h is not an
+// installed header, so a consumer names them by string. Do not "fix" this by
+// hunting for a header to include -- there isn't one.
+//
+// Never call set_option on this key: it returns InvalidArgument by design,
+// because the surrounding option chain would otherwise swallow a write as a
+// silent no-op success.
+int xnnpack_workspace_size_bytes() {
+  using executorch::runtime::BackendOption;
+  using executorch::runtime::Span;
+
+  BackendOption opt{};
+  std::snprintf(opt.key, sizeof(opt.key), "%s", "workspace_size_bytes");
+  Span<BackendOption> span(&opt, 1);
+
+  const Error err =
+      executorch::ET_RUNTIME_NAMESPACE::get_option("XnnpackBackend", span);
+  if (err != Error::Ok) {
+    if (err == Error::NotFound) {
+      throw EtException({ErrorKind::BackendMissing,
+          "XnnpackBackend is not registered, so its workspace size cannot be read",
+          "XnnpackBackend"});
+    }
+    throw EtException({ErrorKind::Execution,
+        "get_option(XnnpackBackend, workspace_size_bytes) failed with ExecuTorch error "
+            + std::to_string(static_cast<int>(err)),
+        "XnnpackBackend"});
+  }
+
+  // Upstream's example returns -1 here. We throw instead: this codebase's error
+  // contract is EtException, and a -1 sentinel is indistinguishable from a byte
+  // count to any caller that forgets to check it.
+  const int* val = std::get_if<int>(&opt.value);
+  if (val == nullptr) {
+    throw EtException({ErrorKind::Execution,
+        "XnnpackBackend workspace_size_bytes did not hold an int",
+        "XnnpackBackend"});
+  }
+  return *val;
 }
 
 }  // namespace etnp

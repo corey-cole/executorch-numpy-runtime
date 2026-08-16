@@ -192,4 +192,7 @@ NB_MODULE(_core, m) {
   m.def("registered_backends", &etnp::registered_backends);
   m.def("backend_available", &etnp::backend_available);
   m.def("operator_names", &etnp::operator_names);
+  // GIL released: the read synchronizes with delegate init inside ExecuTorch.
+  m.def("xnnpack_workspace_size_bytes", &etnp::xnnpack_workspace_size_bytes,
+        nb::call_guard<nb::gil_scoped_release>());
 }
