@@ -50,9 +50,12 @@ target_link_libraries(_core PRIVATE
   executorch xnnpack_backend
   extension_module_static extension_data_loader extension_tensor)
 
-# OpenVINO delegate: present in the linux-x86_64 tarball only. Keyed on the TARGET rather
-# than on _ETNP_PLATFORM so a platform that later gains the delegate works with no edit --
-# the same capability-driven philosophy conftest.py documents for requires_kernel_lib.
+# OpenVINO delegate: the linux tarballs BOTH ship the openvino_backend target (the
+# archive builds for aarch64 too), but the OpenVINO runtime itself is deliverable on
+# linux-x86_64 only -- the pip wheel's aarch64 tag is manylinux_2_35, above this
+# project's glibc 2.28 floor, and the upstream OpenVINO bundle pins to linux-x86_64.
+# So we gate on the PIN'S declared OpenVINO platform (capability data, not a hardcoded
+# name): if upstream ever ships an aarch64 bundle, bumping the pin auto-enables it.
 #
 # Deliberately NOT added to the required-target loop above: that loop catches
 # find_package(ExecuTorch) early-returning and producing an empty link line. A target that
@@ -61,12 +64,12 @@ target_link_libraries(_core PRIVATE
 #
 # The delegate dlopens the OpenVINO C API at first use via OPENVINO_LIB_PATH; nothing
 # links against OpenVINO here, so the wheel gains only this static archive.
-if(TARGET openvino_backend)
+if(TARGET openvino_backend AND _ETNP_PLATFORM STREQUAL "${ET_RUNTIME_OPENVINO_PLATFORM}")
   target_link_libraries(_core PRIVATE openvino_backend)
   list(APPEND ETNP_KERNEL_EXPECT_TUS "_GLOBAL__sub_I_OpenvinoBackend.cpp")
-  message(STATUS "etnp: OpenVINO delegate linked")
+  message(STATUS "etnp: OpenVINO delegate linked (platform ${_ETNP_PLATFORM})")
 else()
-  message(STATUS "etnp: OpenVINO delegate not available in this runtime prefix")
+  message(STATUS "etnp: OpenVINO delegate not linked on platform ${_ETNP_PLATFORM}")
 endif()
 
 # _etnp_kernel_libs is the SINGLE SOURCE OF TRUTH for the advertised kernel set. Every APPEND
