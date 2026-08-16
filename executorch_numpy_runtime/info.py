@@ -24,3 +24,20 @@ def runtime_info() -> dict:
         "supported_dtypes": _SUPPORTED_DTYPES,
         "bfloat16": "uint16-passthrough",
     }
+
+
+def xnnpack_workspace_size_bytes() -> int:
+    """Size in bytes of the XNNPACK delegate's workspace arena.
+
+    Deliberately NOT a key in :func:`runtime_info`. That function reports static
+    capability description; this is mutable process state, and a ``0`` sitting beside
+    ``supported_dtypes`` would read as broken capability reporting rather than as
+    correct lazy initialization.
+
+    Returns ``0`` until the first XNNPACK-delegated method loads -- the arena is created
+    lazily during delegate init. The figure is process-wide (all live XNNPACK delegates
+    share one arena), a high-water mark that is never shrunk, and includes allocator
+    alignment padding, so it slightly over-estimates live tensor bytes. It saturates at
+    ``INT_MAX`` rather than wrapping. Report it as-is; do not sum it across instances.
+    """
+    return _core.xnnpack_workspace_size_bytes()
