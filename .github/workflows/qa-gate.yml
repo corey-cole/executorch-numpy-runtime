@@ -89,7 +89,7 @@ jobs:
           set -euo pipefail
           export PATH=/opt/python/cp312-cp312/bin:$PATH
           python -m pip install -e . --quiet
-          python -m pip install --quiet "openvino==2025.4.1"
+          python -m pip install --quiet pytest "openvino==2025.4.1"
           python -m pytest tests/test_openvino_parity.py tests/test_openvino_resolution.py \
             tests/test_openvino_errors.py -v -s
 
@@ -99,6 +99,7 @@ jobs:
           set -euo pipefail
           export PATH=/opt/python/cp312-cp312/bin:$PATH
           python -m pip install -e . --quiet
+          python -m pip install --quiet pytest
           python -m pytest tests/test_openvino_errors.py -v
 
       # Race harness is problematic when running in a container on GitHub Actions
