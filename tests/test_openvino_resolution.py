@@ -1,10 +1,15 @@
 import subprocess
 import sys
 import textwrap
+from pathlib import Path
 
 import pytest
 
-FIXTURE = "tests/models/openvino/openvino_tiny.pte"
+# Absolute, not relative: these paths are used inside fresh-interpreter subprocesses
+# whose cwd is whatever the harness chose (cibuildwheel runs the wheel test leg from a
+# temp dir, not the project root), so a cwd-relative path would silently miss.
+FIXTURE = str(Path(__file__).parent / "models" / "openvino" / "openvino_tiny.pte")
+CONV = str(Path(__file__).parent / "models" / "conv.pte")
 
 
 def _run(script: str) -> subprocess.CompletedProcess:
@@ -77,12 +82,12 @@ def test_non_openvino_program_never_touches_the_env():
     """Users who never load an OpenVINO model must not pay for this feature -- no
     openvino import, no global env mutation."""
     proc = _run(
-        """
+        f"""
         import os, sys
         os.environ.pop("OPENVINO_LIB_PATH", None)
         import numpy as np
         import executorch_numpy_runtime as en
-        prog = en.Runtime.get().load_program("tests/models/conv.pte")
+        prog = en.Runtime.get().load_program({CONV!r})
         prog.load_method("forward")([np.ones((1, 3, 16, 16), np.float32)])
         assert "OPENVINO_LIB_PATH" not in os.environ
         assert "openvino" not in sys.modules

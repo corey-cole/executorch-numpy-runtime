@@ -33,10 +33,14 @@ def test_method_meta_does_not_initialize_delegates():
     import sys
     import textwrap
 
+    # Absolute, not relative: this runs in a fresh interpreter whose cwd is the
+    # harness's, not necessarily the project root (cibuildwheel runs the wheel test
+    # leg from a temp dir).
+    conv_path = model_or_skip("conv.pte")
     script = textwrap.dedent(
-        """
+        f"""
         from executorch_numpy_runtime import _core
-        rt = _core.load_path("tests/models/conv.pte")
+        rt = _core.load_path({conv_path!r})
         assert _core.xnnpack_workspace_size_bytes() == 0, "load_path initialized a delegate"
         rt.method_meta("forward")
         rt.method_uses_backend("forward", "XnnpackBackend")

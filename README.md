@@ -7,6 +7,7 @@ A torch-free Python runtime for ExecuTorch `.pte` files. **numpy is the only req
 ```bash
 pip install executorch-numpy-runtime            # numpy only
 pip install executorch-numpy-runtime[bf16]      # + ml_dtypes for real bfloat16
+pip install executorch-numpy-runtime[openvino]  # + OpenVINO delegate runtime (linux-x86_64 only; a no-op elsewhere)
 ```
 
 **Wheels:** `cp312-abi3`, `manylinux_2_28_x86_64`, Python 3.12+.
@@ -127,6 +128,10 @@ en.runtime_info()
 
 en.xnnpack_workspace_size_bytes()
 # Size in bytes of the XNNPACK workspace arena; 0 before the first delegated load, process-wide, high-water mark.
+
+en.openvino_inference_precision()
+# 'f32' or 'bf16': the precision OpenVINO will compute in on this CPU (linux-x86_64, [openvino] extra).
+# This is what keeps the deliberately loose atol=1e-2 fixture-parity tolerance observable.
 ```
 
 ## Developing

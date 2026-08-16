@@ -65,6 +65,10 @@ manylinux-x86_64-image = "manylinux_2_28"
 manylinux-aarch64-image = "manylinux_2_28"
 test-command = "pytest {project}/tests"
 test-requires = ["pytest"]
+# The extra's environment marker makes this correctly inert on aarch64 and Windows, so one
+# setting covers every leg with no conditionals -- the payoff for putting the marker in the
+# extra rather than branching here.
+test-extras = ["openvino"]
 
 # cibuildwheel does NOT repair Windows wheels by default -- there is no auditwheel there.
 # _core is C++ and imports MSVCP140.dll + VCRUNTIME140_THREADS.dll, neither of which ships
