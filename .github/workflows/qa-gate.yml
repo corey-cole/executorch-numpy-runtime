@@ -37,14 +37,20 @@ jobs:
           dnf install -y -q "gcc-toolset-${TOOLSET_VER}-libasan-devel" || true
           dnf install -y -q "gcc-toolset-${TOOLSET_VER}-libtsan-devel" || true
 
+      - name: Check pin rows
+        run: ./scripts/check-pin-rows.sh
+
       # Although not technically required, we want to verify that the runtime provenance is valid before we run
-      # any tests to avoid useless test cycles   
+      # any tests to avoid useless test cycles
       - name: Download ExecuTorch runtime library
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          url="$(grep -oE 'https://[^"]*logging-${{ matrix.platform }}\.tar\.gz' cmake/RuntimePin.cmake | head -1)"
-          test -n "${url}" || { echo "no logging URL in RuntimePin.cmake"; exit 1; }
+          # Scrapes the GENERATED pin's raw text before/without invoking CMake. The trailing
+          # \.tar\.gz anchor is load-bearing: it excludes the windows-x86_64-static (/MT) row.
+          # scripts/check-pin-rows.sh asserts this; keep the two patterns identical.
+          url="$(grep -oE 'https://[^"]*logging-${{ matrix.platform }}\.tar\.gz' cmake/EtRuntimePin.cmake | head -1)"
+          test -n "${url}" || { echo "no logging URL in EtRuntimePin.cmake"; exit 1; }
           curl -fL -o runtime.tgz "${url}"
           gh attestation verify runtime.tgz --repo measly-java-learning/executorch-runtime-dist
           mkdir -p third_party
