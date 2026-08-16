@@ -69,7 +69,9 @@ Three layers, bottom-up:
 
 ## Runtime fetch & provenance
 
-`cmake/RuntimePin.cmake` pins the tarball URL + SHA256 and fetches+hash-verifies via `FetchContent`. Source: [`executorch-runtime-dist`](https://github.com/measly-java-learning/executorch-runtime-dist/releases). CI additionally verifies provenance with `gh attestation verify --repo measly-java-learning/executorch-runtime-dist` (byte-hash alone doesn't prove origin).
+`cmake/EtRuntimePin.cmake` is vendored verbatim from an [`executorch-runtime-dist`](https://github.com/measly-java-learning/executorch-runtime-dist/releases) release and holds the URL + SHA256 rows and the `et_runtime_dist_url()` selector — it is **generated; never hand-edit it**. `cmake/RuntimePin.cmake` holds only what is ours: platform detection, the selector call, `FetchContent` hash-verified fetch, and the `ETNP_RUNTIME_PREFIX` escape hatch. Bump by re-downloading the pin (`gh release download <tag> --repo measly-java-learning/executorch-runtime-dist --pattern 'EtRuntimePin.cmake' --dir cmake/ --clobber`) and running `./scripts/check-pin-rows.sh`. CI additionally verifies provenance with `gh attestation verify --repo measly-java-learning/executorch-runtime-dist` (byte-hash alone doesn't prove origin).
+
+Windows selects the `windows-x86_64` (`/MD`) row deliberately — a CPython extension must match CPython's own CRT. The pin also carries `windows-x86_64-static` (`/MT`) for JNI consumers; `scripts/check-pin-rows.sh` guards against selecting it.
 
 ## Custom kernels
 

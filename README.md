@@ -138,7 +138,7 @@ For contributors building from source.
 
 ### 1. Runtime fetch (automatic)
 
-`cmake/RuntimePin.cmake` pins the tarball URL + SHA256 for the current ExecuTorch release and fetches + hash-verifies it via CMake's `FetchContent` — no manual download step needed for a normal build.
+`cmake/EtRuntimePin.cmake (generated, vendored) plus cmake/RuntimePin.cmake (selection + fetch)` pins the tarball URL + SHA256 for the current ExecuTorch release and fetches + hash-verifies it via CMake's `FetchContent` — no manual download step needed for a normal build.
 
 If you'd rather point at a runtime you've unpacked yourself (e.g. a local rebuild, or an air-gapped environment), pass `-DETNP_RUNTIME_PREFIX=/path/to/executorch-runtime-1.3.1-logging-linux-x86_64` and the fetch is skipped in favor of that prefix; the build fails early with a clear message if it doesn't contain `lib/cmake/ExecuTorch/executorch-config.cmake`.
 
@@ -219,7 +219,7 @@ Therefore, before executing this step, ensure that the `build/` directory is emp
 | `executorch_numpy_runtime/` | Pure-Python `Runtime`/`Program`/`Method`, `runtime_info()`, error hierarchy. |
 | `native_tests/` | ASan/LSan leak harness + TSan race harness (link `et_core` directly, no Python) and the TSan suppressions file. |
 | `tools/export_fixtures.py` | Offline `.pte` fixture generation (torch env). |
-| `cmake/` | `RuntimePin.cmake` (runtime prefix), `assert_kernels_registered.cmake` (post-link guard). |
+| `cmake/` | `EtRuntimePin.cmake` (generated pin), `RuntimePin.cmake` (runtime prefix), `assert_kernels_registered.cmake` (post-link guard). |
 
 ### Build-time guards & gotchas
 
