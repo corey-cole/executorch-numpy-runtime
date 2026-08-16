@@ -124,6 +124,9 @@ en.runtime_info()
 #   "supported_dtypes": [...],
 #   "bfloat16": "uint16-passthrough"
 # }
+
+en.xnnpack_workspace_size_bytes()
+# Size in bytes of the XNNPACK workspace arena; 0 before the first delegated load, process-wide, high-water mark.
 ```
 
 ## Developing
