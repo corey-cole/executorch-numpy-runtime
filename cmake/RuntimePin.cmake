@@ -1,25 +1,33 @@
-# Pins the ExecuTorch runtime prefix + its expected tarball SHA256.
-# Mirrors executorch-runtime-dist's EtRuntimePin.cmake contract, as used by
-# djl-executorch-engine/native/cmake/EtRuntimePin.cmake: escape hatch
-# (ETNP_RUNTIME_PREFIX set by the caller) OR FetchContent the pinned, hash-verified tarball.
-# Bump procedure: update ETNP_ET_VERSION/ETNP_RUNTIME_VERSION AND the URL/SHA256 rows below
-# together to the next `v<etver>-<pkgrev>` executorch-runtime-dist release. The SHA256 change
-# is the supply-chain review gate; CI's separate `gh attestation verify` step covers provenance
-# (see docs on CI setup). Also re-vendor scripts/check-usdt-notes.sh from the same upstream
-# release and update docs/usdt-tracepoints.md's probe table if the USDT probe contract
-# changed -- otherwise assert_usdt_probes.cmake keeps asserting the OLD contract, stays green
-# against surviving old probes, and a new/changed probe ships undocumented and unguarded.
+# Selects and fetches the pinned ExecuTorch runtime prefix.
 #
-# NOTE: the URL rows below are intentionally fully-resolved literals, not built from
-# ${ETNP_ET_VERSION}/${ETNP_RUNTIME_VERSION} substitution, even though that duplicates the
-# version. CI (qa-gate.yml, build-wheels.yml) greps this file's raw text to extract the URL
-# before/without invoking CMake; a CMake ${VAR} template would scrape as literal "${...}" text
-# and break that. Keep literals and version vars in sync by hand when bumping.
-set(ETNP_ET_VERSION "1.3.1" CACHE STRING "Pinned ExecuTorch version")
-set(ETNP_RUNTIME_VERSION "1.3.1-6" CACHE STRING "Pinned executorch-runtime-dist package revision")
+# The pin itself -- URLs, SHA256s, versions -- lives in the GENERATED cmake/EtRuntimePin.cmake,
+# vendored verbatim from an executorch-runtime-dist release. This file holds only what is ours:
+# platform detection, the row selection, the fetch, and the escape hatch.
+#
+# Bump procedure:
+#   gh release download <tag> --repo measly-java-learning/executorch-runtime-dist \
+#     --pattern 'EtRuntimePin.cmake' --dir cmake/ --clobber
+#   ./scripts/check-pin-rows.sh
+# The SHA256 change in that diff is the supply-chain review gate; CI's separate
+# `gh attestation verify` step covers provenance. Also re-check whether the USDT probe contract
+# moved upstream (scripts/check-usdt-notes.sh, docs/usdt-tracepoints.md) -- if it did and you skip
+# it, assert_usdt_probes.cmake keeps asserting the OLD contract, stays green against surviving old
+# probes, and a new probe ships undocumented and unguarded.
+#
+# The generated file's URLs are intentionally literal, which CI depends on: qa-gate.yml greps this
+# pin's raw text for a URL before/without invoking CMake. scripts/check-pin-rows.sh guards that
+# contract and the /MD-vs-/MT row choice; run it after any bump.
+include(${CMAKE_CURRENT_LIST_DIR}/EtRuntimePin.cmake)
+
+# Derived, deliberately NOT cached: a cached value would silently survive a bump in an existing
+# build directory and report the previous release's version.
+set(ETNP_ET_VERSION "${ET_RUNTIME_ET_VERSION}")
+set(ETNP_RUNTIME_VERSION "${ET_RUNTIME_VERSION}")
+
 set(ETNP_RUNTIME_VARIANT "logging" CACHE STRING "Runtime variant: logging (only variant this project ships)")
+
 # Derive the runtime platform slug from the build's target architecture so the correct
-# per-arch pin row (below) is chosen automatically on both x86_64 and aarch64 CI runners.
+# per-arch pin row is chosen automatically on both x86_64 and aarch64 CI runners.
 # CMAKE_SYSTEM_PROCESSOR is populated by project()/the toolchain and is the target arch
 # (equals the host arch for the native builds this project does). A caller may still
 # pre-set _ETNP_PLATFORM (e.g. -D for a cross-build) to bypass detection.
@@ -46,23 +54,11 @@ if(NOT _ETNP_PLATFORM)
       "Set _ETNP_PLATFORM explicitly to override.")
   endif()
 
+  # "windows-x86_64" is the /MD (dynamic CRT) row, deliberately: a CPython extension must match
+  # CPython's own CRT. The pin also carries "windows-x86_64-static" (/MT), which exists for JNI
+  # consumers -- never select it here. Guarded by scripts/check-pin-rows.sh.
   set(_ETNP_PLATFORM "${_etnp_os}-${_etnp_machine}")
 endif()
-
-set(ETNP_RUNTIME_URL_logging_linux-x86_64
-  "https://github.com/measly-java-learning/executorch-runtime-dist/releases/download/v1.3.1-6/executorch-runtime-1.3.1-logging-linux-x86_64.tar.gz")
-set(ETNP_RUNTIME_SHA256_logging_linux-x86_64 "e1c29f4fe7d0e108bfc3a4dc6f0bfb98eb5af97a175b5bae95da61446d8542cd")
-
-set(ETNP_RUNTIME_URL_logging_linux-aarch64
-  "https://github.com/measly-java-learning/executorch-runtime-dist/releases/download/v1.3.1-6/executorch-runtime-1.3.1-logging-linux-aarch64.tar.gz")
-set(ETNP_RUNTIME_SHA256_logging_linux-aarch64 "feea21ea4d18673601bc7ce231ede25e19a48a1a0ba67d0b02dd490f6ce11eb5")
-
-# windows-x86_64 ships the `logging` variant ONLY -- there is no bare/devtools Windows build
-# upstream. This tarball is also CORE-ONLY: no optimized/quantized ops libs, no ETNPExtras
-# (and therefore no USDT probes; its BUILDINFO records usdt=n/a).
-set(ETNP_RUNTIME_URL_logging_windows-x86_64
-  "https://github.com/measly-java-learning/executorch-runtime-dist/releases/download/v1.3.1-6/executorch-runtime-1.3.1-logging-windows-x86_64.tar.gz")
-set(ETNP_RUNTIME_SHA256_logging_windows-x86_64 "d2bc1859429fe33940adfd110f75d81bb5bedf3163c919d93d8c63531a967a2e")
 
 # Resolve relative to this file's location (repo-root/cmake/), not the including project's
 # CMAKE_SOURCE_DIR, so both the top-level build and native_tests' standalone
@@ -71,12 +67,9 @@ set(ETNP_RUNTIME_PREFIX "" CACHE PATH
   "Explicit ExecuTorch install prefix (escape hatch); empty => fetch the pinned tarball")
 
 if(NOT ETNP_RUNTIME_PREFIX)
-  set(_ETNP_URL "${ETNP_RUNTIME_URL_${ETNP_RUNTIME_VARIANT}_${_ETNP_PLATFORM}}")
-  set(_ETNP_SHA256 "${ETNP_RUNTIME_SHA256_${ETNP_RUNTIME_VARIANT}_${_ETNP_PLATFORM}}")
-  if(NOT _ETNP_URL)
-    message(FATAL_ERROR
-      "No pin row for variant='${ETNP_RUNTIME_VARIANT}' platform='${_ETNP_PLATFORM}' in RuntimePin.cmake")
-  endif()
+  # Fails at configure time naming both values if the combination was never published, rather
+  # than expanding to "" and surfacing later as a confusing empty-URL FetchContent error.
+  et_runtime_dist_url("${ETNP_RUNTIME_VARIANT}" "${_ETNP_PLATFORM}" _ETNP_URL _ETNP_SHA256)
 
   include(FetchContent)
   FetchContent_Declare(etnp_runtime URL "${_ETNP_URL}" URL_HASH "SHA256=${_ETNP_SHA256}")
