@@ -22,12 +22,12 @@
 - **Package name:** distribution `executorch-numpy-runtime`, import `executorch_numpy_runtime`, extension module `executorch_numpy_runtime._core`.
 
 **Reference sources (read, don't blindly copy):**
-- JNI core (reuse foundation): `/home/corey/workspace/djl-executorch-engine/native/core/et_runtime.{h,cpp}`
-- Leak harness (port target): `/home/corey/workspace/djl-executorch-engine/native/harness/et_leak_harness.cpp`
-- Whole-archive assert (port target): `/home/corey/workspace/djl-executorch-engine/native/cmake/assert_xnnpack_registered.cmake`
-- Upstream pybindings (pattern source, do NOT fork): `/home/corey/workspace/executorch/extension/pybindings/pybindings.cpp`
-- Prebuilt runtime tarball + config: `/home/corey/workspace/executorch-runtime-dist/dist/executorch-runtime-1.3.1-logging-linux-x86_64.tar.gz`, unpacks to `lib/cmake/ExecuTorch/executorch-config.cmake`
-- Fixture-generation venv (has executorch 1.3.1 + torch): `/home/corey/workspace/executorch/.venv`
+- JNI core (reuse foundation): `/path/to/djl-executorch-engine/native/core/et_runtime.{h,cpp}`
+- Leak harness (port target): `/path/to/djl-executorch-engine/native/harness/et_leak_harness.cpp`
+- Whole-archive assert (port target): `/path/to/djl-executorch-engine/native/cmake/assert_xnnpack_registered.cmake`
+- Upstream pybindings (pattern source, do NOT fork): `/path/to/executorch/extension/pybindings/pybindings.cpp`
+- Prebuilt runtime tarball + config: `/path/to/executorch-runtime-dist/dist/executorch-runtime-1.3.1-logging-linux-x86_64.tar.gz`, unpacks to `lib/cmake/ExecuTorch/executorch-config.cmake`
+- Fixture-generation venv (has executorch 1.3.1 + torch): `/path/to/et-venv`
 
 ---
 
@@ -89,7 +89,7 @@ executorch-numpy-runtime/
 Run:
 ```bash
 mkdir -p third_party
-tar -xzf /home/corey/workspace/executorch-runtime-dist/dist/executorch-runtime-1.3.1-logging-linux-x86_64.tar.gz -C third_party
+tar -xzf /path/to/executorch-runtime-dist/dist/executorch-runtime-1.3.1-logging-linux-x86_64.tar.gz -C third_party
 ls third_party/*/lib/cmake/ExecuTorch/executorch-config.cmake
 ```
 Expected: the config path prints (note the top-level dir name, e.g. `executorch-runtime-1.3.1-logging-linux-x86_64`).
@@ -290,7 +290,7 @@ git commit -m "feat: scaffold build with pinned ET 1.3.1 runtime and whole-archi
 
 ```python
 """Generate .pte test fixtures. Run inside the ExecuTorch 1.3.1 venv:
-  /home/corey/workspace/executorch/.venv/bin/python tools/export_fixtures.py tests/models
+  /path/to/et-venv/bin/python tools/export_fixtures.py tests/models
 """
 import sys
 from pathlib import Path
@@ -344,7 +344,7 @@ if __name__ == "__main__":
 
 Run:
 ```bash
-/home/corey/workspace/executorch/.venv/bin/python tools/export_fixtures.py tests/models
+/path/to/et-venv/bin/python tools/export_fixtures.py tests/models
 ls -la tests/models/
 ```
 Expected: `add.pte`, `dtypes.pte`, `multi.pte` exist. (If the multi-method export API differs in 1.3.1, fall back to committing `add.pte`/`dtypes.pte` and generate `multi.pte` via two single-method programs; keep going.)
@@ -517,7 +517,7 @@ std::vector<std::string> Runtime::method_names() const {
 }  // namespace etnp
 ```
 
-Note: verify `Module(const void*, size_t)` and `method_names()` signatures against `/home/corey/workspace/executorch/extension/module/module.h`; adjust the buffer-ctor call if 1.3.1 uses a loader/`BufferDataLoader` instead. The `owned_bytes` field guarantees the buffer outlives the `Module` regardless.
+Note: verify `Module(const void*, size_t)` and `method_names()` signatures against `/path/to/executorch/extension/module/module.h`; adjust the buffer-ctor call if 1.3.1 uses a loader/`BufferDataLoader` instead. The `owned_bytes` field guarantees the buffer outlives the `Module` regardless.
 
 - [ ] **Step 7: Bind in `src/binding/module.cpp`**
 
@@ -1294,7 +1294,7 @@ std::vector<std::string> operator_names() {
   return out;
 }
 ```
-Note: verify the exact 1.3.1 API names (`get_num_registered_backends`/`get_backend_name`, kernel registry accessor) against `/home/corey/workspace/executorch/runtime/`. Consult upstream `pybindings.cpp` `get_operator_names`/`_get_registered_backend_names` for the precise calls — that is exactly what pattern #4 ports.
+Note: verify the exact 1.3.1 API names (`get_num_registered_backends`/`get_backend_name`, kernel registry accessor) against `/path/to/executorch/runtime/`. Consult upstream `pybindings.cpp` `get_operator_names`/`_get_registered_backend_names` for the precise calls — that is exactly what pattern #4 ports.
 
 - [ ] **Step 4: Bind in `src/binding/module.cpp`**
 
@@ -1551,7 +1551,7 @@ git commit -m "feat: high-level Runtime/Program/Method numpy API"
 
 Run:
 ```bash
-/home/corey/workspace/executorch/.venv/bin/python tools/export_fixtures.py tests/models
+/path/to/et-venv/bin/python tools/export_fixtures.py tests/models
 ls tests/models/
 ```
 Expected: `dynamic.pte` and (ideally) `quantized.pte` created.

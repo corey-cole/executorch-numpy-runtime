@@ -1,5 +1,10 @@
 """Generate .pte test fixtures. Run inside the ExecuTorch 1.3.1 venv:
-  /home/corey/workspace/executorch/.venv/bin/python tools/export_fixtures.py tests/models
+  PATH="/path/to/et-venv/bin:$PATH" /path/to/et-venv/bin/python \
+      tools/export_fixtures.py tests/models
+
+Serialization shells out to `flatc`, which the executorch package resolves from PATH rather
+than from the interpreter -- so invoking the venv's python by absolute path is not enough on
+its own, and fails late with FileNotFoundError: 'flatc' after the export work is done.
 """
 import sys
 from pathlib import Path
