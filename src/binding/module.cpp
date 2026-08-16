@@ -168,7 +168,11 @@ NB_MODULE(_core, m) {
         d["inputs"] = to_list(m.inputs);
         d["outputs"] = to_list(m.outputs);
         return d;
-      });
+      })
+      .def("method_uses_backend",
+           [](Runtime& self, const std::string& n, const std::string& b) {
+             return self.method_uses_backend(n, b);
+           });
 
   m.def("load_path", [](const std::string& p) { return Runtime::load_path(p); });
   m.def("load_buffer", [](nb::bytes b) {

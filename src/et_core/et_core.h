@@ -82,6 +82,12 @@ class Runtime {
   ~Runtime();
   std::vector<std::string> method_names() const;
   MethodMeta method_meta(const std::string& name) const;                  // Task 8
+
+  // True if `name` is lowered to `backend`. Reads MethodMeta only -- does NOT load
+  // the method, which is what lets a caller configure a delegate (e.g. set
+  // OPENVINO_LIB_PATH) before delegate init runs. Guarded by
+  // tests/test_backend_detection.py::test_method_meta_does_not_initialize_delegates.
+  bool method_uses_backend(const std::string& name, const std::string& backend) const;
   ForwardResult run_method(const std::string& name,
                            const std::vector<InputDesc>& inputs);          // Task 5
   explicit Runtime(std::unique_ptr<RuntimeState> s);

@@ -145,6 +145,20 @@ MethodMeta Runtime::method_meta(const std::string& name) const {
   return out;
 }
 
+// Uses MethodMeta::uses_backend (runtime/executor/method_meta.h:257). Same locking
+// rationale as method_meta(): Module::method_meta mutates internal state, so hold
+// exec_mutex to avoid racing execute().
+bool Runtime::method_uses_backend(const std::string& name,
+                                  const std::string& backend) const {
+  std::lock_guard<std::mutex> guard(state_->exec_mutex);
+  auto meta = state_->module->method_meta(name);
+  if (!meta.ok()) {
+    throw EtException({ErrorKind::Load,
+        "Could not read metadata for method '" + name + "'", name});
+  }
+  return meta->uses_backend(backend.c_str());
+}
+
 ForwardResult Runtime::run_method(const std::string& name,
                                    const std::vector<InputDesc>& inputs) {
   std::vector<std::vector<executorch::aten::SizesType>> shapes(inputs.size());
