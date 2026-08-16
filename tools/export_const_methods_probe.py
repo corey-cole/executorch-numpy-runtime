@@ -2,7 +2,7 @@
 branch of Runtime::run_method each kind of constant method hits.
 
 Run inside the ExecuTorch 1.3.1 venv:
-  /home/corey/workspace/executorch/.venv/bin/python \
+  /path/to/et-venv/bin/python \
       tools/export_const_methods_probe.py tests/models
 
 Produces const_methods.pte with:

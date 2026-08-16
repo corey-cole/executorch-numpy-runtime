@@ -158,6 +158,7 @@ NB_MODULE(_core, m) {
             nb::dict d;
             d["scalar_type"] = t.scalar_type;
             d["shape"] = nb::cast(t.shape);
+            d["is_memory_planned"] = t.is_memory_planned;
             l.append(d);
           }
           return l;

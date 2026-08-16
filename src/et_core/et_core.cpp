@@ -107,7 +107,7 @@ std::vector<std::string> Runtime::method_names() const {
 }
 
 // Uses executorch::runtime::Result<MethodMeta> Module::method_meta(name)
-// (extension/module/module.h) and TensorInfo::sizes()/scalar_type()
+// (extension/module/module.h) and TensorInfo::sizes()/scalar_type()/is_memory_planned()
 // (runtime/executor/method_meta.h) -- both verified against the installed
 // 1.3.1 headers. Non-tensor inputs/outputs (Int/Bool/Double/String tags)
 // have no TensorInfo, so input_tensor_meta()/output_tensor_meta() returns an
@@ -126,11 +126,12 @@ MethodMeta Runtime::method_meta(const std::string& name) const {
     if (info.error() == Error::Ok) {
       TensorMeta tm;
       tm.scalar_type = static_cast<int8_t>(info->scalar_type());
+      tm.is_memory_planned = info->is_memory_planned();
       auto sizes = info->sizes();
       tm.shape.assign(sizes.begin(), sizes.end());
       out.inputs.push_back(std::move(tm));
     } else {
-      out.inputs.push_back(TensorMeta{{}, -1});
+      out.inputs.push_back(TensorMeta{{}, -1, false});
     }
   }
   out.outputs.reserve(mm->num_outputs());
@@ -139,11 +140,12 @@ MethodMeta Runtime::method_meta(const std::string& name) const {
     if (info.error() == Error::Ok) {
       TensorMeta tm;
       tm.scalar_type = static_cast<int8_t>(info->scalar_type());
+      tm.is_memory_planned = info->is_memory_planned();
       auto sizes = info->sizes();
       tm.shape.assign(sizes.begin(), sizes.end());
       out.outputs.push_back(std::move(tm));
     } else {
-      out.outputs.push_back(TensorMeta{{}, -1});
+      out.outputs.push_back(TensorMeta{{}, -1, false});
     }
   }
   return out;

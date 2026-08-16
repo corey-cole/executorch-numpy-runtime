@@ -33,3 +33,18 @@ upstream release asset** and are documented here for traceability.
   `CompileSpec(device=CPU)`. `in.bin`/`out.bin` are float32, 8 values each,
   tensor shape `(1,8)`; `out.bin` is the **eager** golden, so comparisons are
   tolerance-based (see the spec: `atol=1e-2`).
+
+## `unplanned.pte`
+
+`Linear(8,8)`, XNNPACK-delegated, exported with
+`MemoryPlanningPass(alloc_graph_input=False)`.
+
+The **only** fixture here whose inputs are not memory-planned. With the export default
+(`alloc_graph_input=True`) ExecuTorch deep-copies each input into its own arena; with planning
+off it aliases the caller's pointer instead, so backend kernels read numpy-owned memory
+directly. That changes the lifetime contract of `InputDesc` and decides whose alignment and
+trailing padding matter — see issues #11 and #12.
+
+Verify the property with `method_meta(...)["inputs"][i]["is_memory_planned"]`, never by
+inference: `run_method` sets inputs on every call, so the copy/alias distinction is not
+observable behaviourally through this package.
