@@ -53,6 +53,11 @@ struct OutputView {
 struct TensorMeta {
   std::vector<int64_t> shape;  // empty for non-tensor
   int8_t scalar_type;          // -1 for non-tensor
+  // Whether the tensor's memory was planned during export. For INPUTS this decides
+  // who owns the buffer a backend reads: planned => ExecuTorch deep-copies into its
+  // arena; unplanned => it ALIASES the caller's pointer for the duration of the call.
+  // false for non-tensor slots.
+  bool is_memory_planned = false;
 };
 
 struct MethodMeta {
