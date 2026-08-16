@@ -24,6 +24,16 @@ classifiers = [
 [project.optional-dependencies]
 bf16 = ["ml_dtypes>=0.3"]
 
+# Exact pin, never a range: a .pte embeds a precompiled OpenVINO blob, so a floating
+# version lets a rebuild import a blob-incompatible runtime -- which surfaces at model
+# load, not at install. Must equal ET_RUNTIME_OPENVINO_VERSION in cmake/EtRuntimePin.cmake
+# and openvino_version in tests/models/openvino/MANIFEST; scripts/check-pin-rows.sh asserts it.
+#
+# The environment marker means the extra EXISTS everywhere but installs nothing where the
+# delegate is absent, so `pip install ...[openvino]` on aarch64 succeeds as a no-op instead
+# of failing resolution. The user then meets our typed platform error at load time.
+openvino = ["openvino==2025.4.1; sys_platform=='linux' and platform_machine=='x86_64'"]
+
 [dependency-groups]
 dev = [
     "ruff",
