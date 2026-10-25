@@ -9,7 +9,8 @@ find_package(Threads REQUIRED)
 
 include(${CMAKE_SOURCE_DIR}/../cmake/RuntimePin.cmake)
 list(APPEND CMAKE_PREFIX_PATH "${ETNP_RUNTIME_PREFIX}")
-find_package(ExecuTorch CONFIG REQUIRED)
+# Pinned prefix only -- see the root CMakeLists.txt for why the default search is unsafe.
+find_package(ExecuTorch CONFIG REQUIRED PATHS "${ETNP_RUNTIME_PREFIX}" NO_DEFAULT_PATH)
 include(${CMAKE_SOURCE_DIR}/../cmake/Kernels.cmake)
 
 set(ETNP_HARNESS_LIBS

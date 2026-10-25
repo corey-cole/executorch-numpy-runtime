@@ -6,7 +6,11 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 include(cmake/RuntimePin.cmake)
 list(APPEND CMAKE_PREFIX_PATH "${ETNP_RUNTIME_PREFIX}")
-find_package(ExecuTorch CONFIG REQUIRED)
+# Resolve ONLY from the pinned prefix. The executorch pip wheel (>=1.5) ships its own
+# executorch-config.cmake, and scikit-build-core puts site-packages on the search path,
+# so a default search silently picks the wheel's config whenever executorch is installed
+# in the build env -- which then early-returns and defines no targets.
+find_package(ExecuTorch CONFIG REQUIRED PATHS "${ETNP_RUNTIME_PREFIX}" NO_DEFAULT_PATH)
 if(EXISTS "${ETNP_RUNTIME_PREFIX}/lib/cmake/ETNPExtras/ETNPExtras.cmake")
   include("${ETNP_RUNTIME_PREFIX}/lib/cmake/ETNPExtras/ETNPExtras.cmake")
 endif()
