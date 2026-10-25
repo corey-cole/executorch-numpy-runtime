@@ -1,4 +1,4 @@
-"""Generate .pte test fixtures. Run inside the ExecuTorch 1.3.1 venv:
+"""Generate .pte test fixtures. Run inside the ExecuTorch 1.5.1 + torch 2.14.0 venv:
   PATH="/path/to/et-venv/bin:$PATH" /path/to/et-venv/bin/python \
       tools/export_fixtures.py tests/models
 
@@ -66,6 +66,11 @@ class ConvRelu(torch.nn.Module):
 
 
 def main(out):
+    # Weight init, randn example inputs and quantization calibration data are all random.
+    # Seeding makes regeneration byte-reproducible for the same ExecuTorch/torch versions,
+    # so touching one fixture does not rewrite the others (#16). Inserting a new fixture
+    # ahead of existing random ones shifts their RNG stream -- append new ones at the end.
+    torch.manual_seed(0)
     out = Path(out); out.mkdir(parents=True, exist_ok=True)
     xnn = [XnnpackPartitioner()]
     _save("add.pte", Add(), (torch.ones(3), torch.ones(3)), out, xnn)
@@ -111,7 +116,7 @@ def main(out):
     print("wrote dynamic.pte")
 
     # Quantized model (proves optimized/quantized kernels linked).
-    # Uses XNNPACK's PT2E quantization flow. On ExecuTorch 1.3.1 (torch 2.12),
+    # Uses XNNPACK's PT2E quantization flow. On ExecuTorch 1.5.1 (torch 2.14),
     # prepare_pt2e/convert_pt2e live under torchao.quantization.pt2e (moved out
     # of torch.ao.quantization), and there is no separate export_for_training
     # step -- plain torch.export.export already produces a trainable graph.

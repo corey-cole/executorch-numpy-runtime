@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A **torch-free** Python runtime for ExecuTorch `.pte` files. numpy is the only required runtime dependency. It links a **prebuilt, pinned ExecuTorch 1.3.1 static-lib tarball** (this repo does **not** build ExecuTorch) and exposes it as a `cp312-abi3` nanobind extension. CPU only (XNNPACK delegate + portable/optimized/quantized kernels).
+A **torch-free** Python runtime for ExecuTorch `.pte` files. numpy is the only required runtime dependency. It links a **prebuilt, pinned ExecuTorch 1.5.1 static-lib tarball** (this repo does **not** build ExecuTorch) and exposes it as a `cp312-abi3` nanobind extension. CPU only (XNNPACK delegate + portable/optimized/quantized kernels).
 
-The ExecuTorch version is an **exact** compatibility contract (1.3.1). A `.pte` from an incompatible exporter fails to load and looks like a corrupt file.
+The ExecuTorch version is an **exact** compatibility contract (1.5.1). A `.pte` from an incompatible exporter fails to load and looks like a corrupt file.
 
 ## Common commands
 
@@ -29,7 +29,7 @@ uvx cibuildwheel --platform linux
 ```
 
 Point at a self-unpacked runtime instead of the auto-fetched tarball with
-`-DETNP_RUNTIME_PREFIX=/path/to/executorch-runtime-1.3.1-...`.
+`-DETNP_RUNTIME_PREFIX=/path/to/executorch-runtime-1.5.1-...`.
 
 ## Native QA gates (also enforced in CI, `.github/workflows/qa-gate.yml`)
 
@@ -83,11 +83,14 @@ This is a general-purpose runtime; real custom ops (e.g. `nn.LSTM`) are **not** 
 
 ## `.pte` fixtures
 
-Committed under `tests/models/`. Generated offline in a **separate** env that has `executorch==1.3.1` + torch (CPU) + `flatc` on PATH — kept separate on purpose so torch never enters the runtime env:
+Committed under `tests/models/`. Generated offline in a **separate** env that has `executorch==1.5.1` + `torch==2.14.0` (CPU) + `flatc` on PATH — kept separate on purpose so torch never enters the runtime env. `executorch` 1.5.1 does **not** pull in torch; install it explicitly:
 
 ```bash
-/path/to/et-venv/bin/python tools/export_fixtures.py tests/models
+/path/to/et-venv/bin/pip install executorch==1.5.1 torch==2.14.0+cpu --extra-index-url https://download.pytorch.org/whl/cpu
+PATH="/path/to/et-venv/bin:$PATH" /path/to/et-venv/bin/python tools/export_fixtures.py tests/models
 ```
+
+Export is seeded (`torch.manual_seed(0)`), so regeneration is byte-reproducible; append new random fixtures at the end of `main()` so existing ones keep their RNG stream. `lstm/` and `openvino/` are vendored from upstream release assets, not exported here.
 
 ## Benchmarking
 

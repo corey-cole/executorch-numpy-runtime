@@ -16,7 +16,7 @@ def test_method_meta_shapes():
 # link. cibuildwheel runs this suite against the built wheel, which is what makes it a gate.
 def test_runtime_info_reports_version_and_backends():
     info = en.runtime_info()
-    assert info["executorch_version"] == "1.3.1"
+    assert info["executorch_version"] == "1.5.1"
     assert "XnnpackBackend" in info["backends"]
     assert info["bfloat16"] == "uint16-passthrough"
 

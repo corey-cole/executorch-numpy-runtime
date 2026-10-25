@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# VENDORED VERBATIM from measly-java-learning/executorch-runtime-dist @ v1.3.1-6
+# VENDORED VERBATIM from measly-java-learning/executorch-runtime-dist @ v1.5.1-1
 # (scripts/check-usdt-notes.sh). Upstream owns this probe contract; re-vendor on pin bump.
 # Assert the committed etnp USDT probe contract in a linked binary (provider +
 # probe names + per-probe arity), or assert probes are ABSENT when disabled.

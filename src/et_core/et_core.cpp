@@ -45,7 +45,7 @@ struct RuntimeState {
   std::mutex exec_mutex;                    // serializes execute + copy-out per Runtime
 };
 
-// Classify a Module::load() failure. In ExecuTorch 1.3.1, Module::load()
+// Classify a Module::load() failure. In ExecuTorch 1.5.1, Module::load()
 // surfaces a single runtime::Error and does not expose which delegate (if
 // any) was being resolved, so we cannot yet distinguish "corrupt/malformed/
 // version-incompatible file" from "valid file lowered for a backend this
@@ -60,7 +60,7 @@ struct RuntimeState {
 static EtException classify_load_failure(const std::string& what) {
   return EtException({ErrorKind::Load,
       "Failed to load .pte (corrupt, or exported by an ExecuTorch version "
-      "other than the one this runtime targets, 1.3.1): " + what, ""});
+      "other than the one this runtime targets, 1.5.1): " + what, ""});
 }
 
 std::unique_ptr<Runtime> Runtime::load_path(const std::string& path) {
@@ -70,7 +70,7 @@ std::unique_ptr<Runtime> Runtime::load_path(const std::string& path) {
   return std::make_unique<Runtime>(std::move(st));
 }
 
-// Note: ExecuTorch 1.3.1's Module has no `Module(const void*, size_t)` ctor
+// Note: ExecuTorch 1.5.1's Module has no `Module(const void*, size_t)` ctor
 // (see extension/module/module.h) -- only file-path ctors and a ctor taking
 // std::unique_ptr<runtime::DataLoader>. Buffer loads instead go through
 // BufferDataLoader (extension/data_loader/buffer_data_loader.h), a DataLoader
@@ -109,7 +109,7 @@ std::vector<std::string> Runtime::method_names() const {
 // Uses executorch::runtime::Result<MethodMeta> Module::method_meta(name)
 // (extension/module/module.h) and TensorInfo::sizes()/scalar_type()/is_memory_planned()
 // (runtime/executor/method_meta.h) -- both verified against the installed
-// 1.3.1 headers. Non-tensor inputs/outputs (Int/Bool/Double/String tags)
+// 1.5.1 headers. Non-tensor inputs/outputs (Int/Bool/Double/String tags)
 // have no TensorInfo, so input_tensor_meta()/output_tensor_meta() returns an
 // error for them; those slots get TensorMeta{{}, -1} placeholders.
 MethodMeta Runtime::method_meta(const std::string& name) const {
@@ -291,7 +291,7 @@ ForwardResult Runtime::run_method(const std::string& name,
 // get_num_registered_backends()/get_backend_name(size_t) (runtime/backend/
 // interface.h), the exact same pair used by upstream's
 // get_registered_backend_names() in extension/pybindings/pybindings.cpp.
-// Verified against both the installed 1.3.1 header and that upstream call
+// Verified against both the installed 1.5.1 header and that upstream call
 // site.
 std::vector<std::string> registered_backends() {
   std::vector<std::string> names;

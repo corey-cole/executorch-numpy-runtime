@@ -21,7 +21,7 @@ def _load_fixture():
 
 @pytest.mark.requires_kernel_lib("lstm")
 def test_lstm_op_registered():
-    # The upstream runtime (v1.3.1-4) ships etnp::lstm.out registered at load time.
+    # The upstream runtime (v1.3.1-4 and later) ships etnp::lstm.out registered at load time.
     assert "etnp::lstm.out" in _core.operator_names()
 
 
