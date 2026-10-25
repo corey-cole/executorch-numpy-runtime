@@ -1,14 +1,16 @@
 # Vendored test model fixtures
 
 Small `.pte` models used by the Python test suite. Most are generated locally by
-`tools/export_fixtures.py`. The LSTM fixtures are **vendored verbatim from an
+`tools/export_fixtures.py` (ExecuTorch 1.5.1 + torch 2.14.0). The export is seeded, so
+regenerating with the same versions must leave this directory byte-identical (`git status
+--short tests/models/` comes back clean); a diff means the versions or the export changed. The LSTM fixtures are **vendored verbatim from an
 upstream release asset** and are documented here for traceability.
 
 ## LSTM (`lstm/`)
 
-- Source: `executorch-runtime-dist` release **v1.3.1-4** (runtime), LSTM fixtures
-  asset `etnp-lstm-fixtures-1.3.1.tar.gz` (versioned by ExecuTorch version 1.3.1).
-- Asset SHA256: `1b041e4b5d729a35795cd4c943e455b3aa4b22d23cc32dff576f136eaba5f2f2`.
+- Source: `executorch-runtime-dist` release **v1.5.1-1** (runtime), LSTM fixtures
+  asset `etnp-lstm-fixtures-1.5.1.tar.gz` (versioned by ExecuTorch version 1.5.1).
+- Asset SHA256: `a577232eccd329309b0246f735006d601f5411446534d9963466105c7eb273cc`.
 - `lstm.pte`: single-layer, unidirectional, batch_first=False, float32 LSTM using
   `etnp::lstm.out`. The 4 weight tensors are baked in as constants; method
   `forward` takes only `(input, h0, c0)`.

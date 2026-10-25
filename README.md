@@ -23,9 +23,9 @@ out = prog.load_method("forward")([np.ones(3, np.float32), np.ones(3, np.float32
 
 ## Compatibility contract
 
-- **ExecuTorch version: 1.3.1 (exact).** A `.pte` exported by an incompatible ExecuTorch version fails to load and **looks like a corrupt file** — check the exporter version before assuming corruption. Query the build version with `en.runtime_info()`.
+- **ExecuTorch version: 1.5.1 (exact).** A `.pte` exported by an incompatible ExecuTorch version fails to load and **looks like a corrupt file** — check the exporter version before assuming corruption. Query the build version with `en.runtime_info()`.
 
-- **Backends: CPU only** — XNNPACK delegate + portable fallback. `.pte` files lowered for CoreML / QNN / Vulkan / Metal are unsupported and raise `BackendNotAvailable`. Note: a `.pte` lowered for a non-CPU backend may currently surface as `ProgramLoadError` instead of the more specific `BackendNotAvailable` (ExecuTorch 1.3.1 doesn't cheaply expose delegate id at load time).
+- **Backends: CPU only** — XNNPACK delegate + portable fallback. `.pte` files lowered for CoreML / QNN / Vulkan / Metal are unsupported and raise `BackendNotAvailable`. Note: a `.pte` lowered for a non-CPU backend may currently surface as `ProgramLoadError` instead of the more specific `BackendNotAvailable` (ExecuTorch 1.5.1 doesn't cheaply expose delegate id at load time).
 
 - **Operators: core ATen + optimized + quantized kernels.** **Custom operators are NOT included. torchao low-bit kernels are NOT included.**
 
@@ -111,14 +111,14 @@ so exact thread parity across backends isn't guaranteed. Reproduce or extend wit
 - `OperatorNotFound`: An operator required by the `.pte` is not in the linked kernel set.
 - `ExecutionError`: Runtime failure during execution (e.g. shape/dtype mismatch).
 
-Honesty note: `OperatorNotFound` and `BackendNotAvailable` are best-effort under ExecuTorch 1.3.1. That version's `Module::load()`/`execute()` don't always expose which operator or delegate was missing, so some missing-operator/missing-backend cases surface as the more generic `ProgramLoadError` or `ExecutionError` instead of the specific subclass.
+Honesty note: `OperatorNotFound` and `BackendNotAvailable` are best-effort under ExecuTorch 1.5.1. That version's `Module::load()`/`execute()` don't always expose which operator or delegate was missing, so some missing-operator/missing-backend cases surface as the more generic `ProgramLoadError` or `ExecutionError` instead of the specific subclass.
 
 ## Introspection
 
 ```python
 en.runtime_info()
 # {
-#   "executorch_version": "1.3.1",
+#   "executorch_version": "1.5.1",
 #   "backends": [...],
 #   "operators": [...],
 #   "kernel_libs": ["portable", "optimized", "quantized"],
@@ -141,14 +141,14 @@ For contributors building from source.
 ### Prerequisites
 
 - Python **3.12+**, CMake **≥ 3.26**, a C++17 compiler, and `nm` (binutils).
-- The prebuilt, position-independent ExecuTorch **1.3.1** runtime. This project does **not** build ExecuTorch itself — it links a pinned, attested static-lib tarball from
+- The prebuilt, position-independent ExecuTorch **1.5.1** runtime. This project does **not** build ExecuTorch itself — it links a pinned, attested static-lib tarball from
   [`executorch-runtime-dist`](https://github.com/measly-java-learning/executorch-runtime-dist/releases).
 
 ### 1. Runtime fetch (automatic)
 
 `cmake/EtRuntimePin.cmake (generated, vendored) plus cmake/RuntimePin.cmake (selection + fetch)` pins the tarball URL + SHA256 for the current ExecuTorch release and fetches + hash-verifies it via CMake's `FetchContent` — no manual download step needed for a normal build.
 
-If you'd rather point at a runtime you've unpacked yourself (e.g. a local rebuild, or an air-gapped environment), pass `-DETNP_RUNTIME_PREFIX=/path/to/executorch-runtime-1.3.1-logging-linux-x86_64` and the fetch is skipped in favor of that prefix; the build fails early with a clear message if it doesn't contain `lib/cmake/ExecuTorch/executorch-config.cmake`.
+If you'd rather point at a runtime you've unpacked yourself (e.g. a local rebuild, or an air-gapped environment), pass `-DETNP_RUNTIME_PREFIX=/path/to/executorch-runtime-1.5.1-logging-linux-x86_64` and the fetch is skipped in favor of that prefix; the build fails early with a clear message if it doesn't contain `lib/cmake/ExecuTorch/executorch-config.cmake`.
 
 In CI, provenance (that the tarball came from `executorch-runtime-dist`'s own release CI, not just that its bytes match the pinned hash) is verified separately with `gh attestation verify --repo measly-java-learning/executorch-runtime-dist`, mirroring the pattern in `djl-executorch-engine/native/.github/workflows/native-build-job.yml`.
 
@@ -175,11 +175,15 @@ Two tests skip by design: `test_parity.py` skips unless `torch` is importable (i
 
 ### 4. Regenerate `.pte` fixtures
 
-The committed fixtures under `tests/models/` are generated offline in a **separate** environment that has `executorch==1.3.1` and `torch` (CPU) installed (`flatc` must be on `PATH`):
+The committed fixtures under `tests/models/` are generated offline in a **separate** environment that has `executorch==1.5.1` and `torch==2.14.0` (CPU) installed (`flatc` must be on `PATH`). `executorch` 1.5.1 no longer depends on `torch`, so install the version from ExecuTorch's `torch_pin.py` explicitly:
 
 ```bash
-/path/to/et-venv/bin/python tools/export_fixtures.py tests/models
+/path/to/et-venv/bin/pip install executorch==1.5.1 torch==2.14.0+cpu \
+    --extra-index-url https://download.pytorch.org/whl/cpu
+PATH="/path/to/et-venv/bin:$PATH" /path/to/et-venv/bin/python tools/export_fixtures.py tests/models
 ```
+
+The export is seeded, so regenerating with the same versions reproduces the committed bytes exactly — `git status tests/models/` should come back clean.
 
 Keep this env separate from your runtime dev env — the whole point of the project is to not pull torch into the runtime.
 

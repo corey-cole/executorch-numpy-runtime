@@ -1,6 +1,6 @@
 # Consumer Guide: `etnp::lstm.out`
 
-The pinned ExecuTorch runtime (executorch-runtime-dist **v1.3.1-4**, all variants)
+The pinned ExecuTorch runtime (executorch-runtime-dist **v1.3.1-4** and later, all variants)
 ships a first-party custom LSTM operator, `etnp::lstm.out`. The op is not pulled in
 by linking the runtime alone — it ships as a separate static-init archive that must
 be whole-archived (see **Linking** below). This numpy runtime's build already
