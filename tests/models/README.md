@@ -8,9 +8,9 @@ upstream release asset** and are documented here for traceability.
 
 ## LSTM (`lstm/`)
 
-- Source: `executorch-runtime-dist` release **v1.5.1-1** (runtime), LSTM fixtures
+- Source: `executorch-runtime-dist` release **v1.5.1-2** (runtime), LSTM fixtures
   asset `etnp-lstm-fixtures-1.5.1.tar.gz` (versioned by ExecuTorch version 1.5.1).
-- Asset SHA256: `a577232eccd329309b0246f735006d601f5411446534d9963466105c7eb273cc`.
+- Asset SHA256: `70828f763bd9e242baedd52bc5206b8d3552e667e6ab79e2d3ccc6de1b0e146d`.
 - `lstm.pte`: single-layer, unidirectional, batch_first=False, float32 LSTM using
   `etnp::lstm.out`. The 4 weight tensors are baked in as constants; method
   `forward` takes only `(input, h0, c0)`.
