@@ -11,6 +11,11 @@ Produces const_methods.pte with:
   - get_double()    -> 2.5             (double-valued constant method)
   - get_bool()      -> True            (bool-valued constant method)
   - get_tensor()    -> tensor([1,2,3]) (tensor-valued constant method)
+  - get_string()    -> "lin.weight"    (string-valued constant method)
+  - get_strings()   -> ["lin.weight", "lin.bias"]
+                                       (list of strings -> one output each, the shape
+                                        of a training program's __et_training_fqn_<m>)
+  - get_unicode()   -> "\u00e9\u4e2d"    (non-ASCII string: checks UTF-8 round trip)
 """
 import sys
 from pathlib import Path
@@ -35,6 +40,9 @@ def main(out):
             "get_double": 2.5,
             "get_bool": True,
             "get_tensor": torch.tensor([1, 2, 3], dtype=torch.int64),
+            "get_string": "lin.weight",
+            "get_strings": ["lin.weight", "lin.bias"],
+            "get_unicode": "\u00e9\u4e2d",
         },
     ).to_executorch()
     (out / "const_methods.pte").write_bytes(prog.buffer)

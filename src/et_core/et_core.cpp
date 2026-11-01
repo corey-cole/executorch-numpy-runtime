@@ -262,13 +262,22 @@ ForwardResult Runtime::run_method(const std::string& name,
         fs->views.push_back(std::move(v));
         continue;
       }
-      // Anything else (string, list, none, tensor-list) is genuinely
-      // unsupported: raise rather than let toTensor() abort the interpreter.
+      // String EValues point into program/arena memory: copy the bytes out
+      // here, under the lock, like tensor outputs.
+      if (ev.isString()) {
+        OutputView v;
+        v.kind = OutputKind::String;
+        v.str_val = std::string(ev.toString());
+        fs->views.push_back(std::move(v));
+        continue;
+      }
+      // Anything else (list, none, tensor-list) is genuinely unsupported:
+      // raise rather than let toTensor() abort the interpreter.
       if (!ev.isTensor()) {
         throw EtException({ErrorKind::Execution,
             "method '" + name +
             "' returned an unsupported non-tensor output "
-            "(only tensor/int/float/bool are supported)", ""});
+            "(only tensor/int/float/bool/str are supported)", ""});
       }
       const auto& t = ev.toTensor();
       std::vector<uint8_t> buf(t.nbytes());

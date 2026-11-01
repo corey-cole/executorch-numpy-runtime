@@ -58,7 +58,7 @@ Three layers, bottom-up:
 
 **Concurrency model:** a shared `Runtime` is thread-safe but method calls serialize (per-`Runtime` lock — ExecuTorch `Module` is not thread-safe). For true parallelism, one `Runtime` per thread. XNNPACK parallelizes within a single call.
 
-**Outputs are always fresh copies**, never views into runtime memory.
+**Outputs are always fresh copies**, never views into runtime memory. Tensor outputs become `np.ndarray`; scalar and string `EValue`s become Python `int`/`float`/`bool`/`str`. String bytes are copied out under the lock and decoded strictly as UTF-8 in the binding (invalid bytes raise `ExecutionError`).
 
 **XNNPACK workspace size:** `xnnpack_workspace_size_bytes()` reports the delegate's arena size for host-side native-memory accounting. It reads a **read-only** backend option (`XnnpackBackend` / `workspace_size_bytes`) that is a **vendored patch in executorch-runtime-dist**, not upstream ExecuTorch — this will not build against a stock ExecuTorch, and the feature disappears if this project ever stops consuming these tarballs. The value is `0` until the first XNNPACK-delegated method loads (lazy arena creation), process-wide (`EXECUTORCH_XNNPACK_SHARED_WORKSPACE=ON`, so never sum it), and a high-water mark including alignment padding. Requires runtime v1.3.1-10+.
 

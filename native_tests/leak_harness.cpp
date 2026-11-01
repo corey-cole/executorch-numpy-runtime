@@ -1,9 +1,9 @@
 // ASan/LSan leak harness over et_core (no Python). LSan reports unfreed allocations at
 // exit; a leak -> non-zero exit. Model-agnostic: inputs derived from method_meta().
 // Also runs every zero-input method (e.g. constant_methods emitting scalar
-// int/double/bool or tensor EValues) so the scalar-output path is leak-gated;
-// this is a no-op for models whose only method is forward(). Point it at
-// tests/models/const_methods.pte to cover the scalar branch.
+// int/double/bool, string or tensor EValues) so the non-tensor output paths are
+// leak-gated; this is a no-op for models whose only method is forward(). Point it
+// at tests/models/const_methods.pte to cover those branches.
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -57,7 +57,7 @@ int main(int argc, char** argv) {
       (void)res.outputs();
     }
     // Exercise every zero-input method: constant_methods surface as scalar
-    // (int/double/bool) or tensor EValues through run_method's output path.
+    // (int/double/bool), string or tensor EValues through run_method's output path.
     for (const auto& mname : const_methods) {
       auto res = rt->run_method(mname, {});
       (void)res.outputs();

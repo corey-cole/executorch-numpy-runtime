@@ -35,6 +35,8 @@ out = prog.load_method("forward")([np.ones(3, np.float32), np.ones(3, np.float32
 
 - **Outputs are always fresh copies** — never views into runtime memory; safe to keep across subsequent calls.
 
+- **Output types** — tensors come back as `np.ndarray`; scalar outputs (e.g. from `constant_methods`) as Python `int`/`float`/`bool`; string outputs as `str` (strict UTF-8). A training program's `__et_training_fqn_<method>` returns its parameter names this way.
+
 ## Platform support
 
 | Platform | Wheel | Kernel libs (`kernel_libs`) | Custom ops | USDT probes |

@@ -31,15 +31,18 @@ struct InputDesc {
 };
 
 // Output kind: a method output is either a tensor (bytes copied out of the
-// arena) or a scalar EValue (int/double/bool), which ExecuTorch emits for
-// constant_methods that return a plain Python scalar. Scalars are carried by
-// value, so they need no backing storage.
-enum class OutputKind : int8_t { Tensor, Int, Double, Bool };
+// arena), a scalar EValue (int/double/bool), which ExecuTorch emits for
+// constant_methods that return a plain Python scalar, or a string EValue
+// (e.g. the parameter names of a training program's __et_training_fqn_<m>).
+// Scalars are carried by value, so they need no backing storage; strings are
+// copied into `str_val`.
+enum class OutputKind : int8_t { Tensor, Int, Double, Bool, String };
 
 // Output view. For Tensor: `data`/`nbytes`/`shape`/`scalar_type` point into
 // ForwardResult-owned storage (valid for the ForwardResult's life). For scalar
 // kinds: the value lives in `int_val` (Int/Bool) or `double_val` (Double) and
-// the tensor fields are unused.
+// the tensor fields are unused. For String: the raw bytes live in `str_val`
+// (not validated as UTF-8 here; the binding decides how to decode them).
 struct OutputView {
   OutputKind kind = OutputKind::Tensor;
   std::vector<int64_t> shape;
@@ -48,6 +51,7 @@ struct OutputView {
   size_t nbytes = 0;
   int64_t int_val = 0;      // Int / Bool (0|1)
   double double_val = 0.0;  // Double
+  std::string str_val;      // String
 };
 
 struct TensorMeta {
