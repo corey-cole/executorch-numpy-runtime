@@ -61,13 +61,27 @@ static HeldInput make_held_input(nb::handle obj, bool* was_contig = nullptr) {
 // allocate and OWN a fresh buffer and memcpy the bytes in -- exactly the
 // mandatory-copy, `OWNDATA=True` semantics this binding must guarantee.
 // (Verified by reading the installed nanobind 2.13.0 source, not assumed.)
-static nb::object copy_out(const etnp::OutputView& v) {
+static nb::object copy_out(const etnp::OutputView& v, const std::string& method,
+                           size_t index) {
   // Scalar EValues (from constant_methods) surface as native Python scalars,
   // matching executorch.runtime.Method.execute -> [128] / [2.5] / [True].
   switch (v.kind) {
     case etnp::OutputKind::Int:    return nb::int_(v.int_val);
     case etnp::OutputKind::Bool:   return nb::bool_(v.int_val != 0);
     case etnp::OutputKind::Double: return nb::float_(v.double_val);
+    case etnp::OutputKind::String: {
+      // Strict UTF-8. Bytes that are not valid UTF-8 raise ExecutionError naming
+      // the output rather than being silently replaced.
+      PyObject* s = PyUnicode_DecodeUTF8(v.str_val.data(),
+                                         (Py_ssize_t)v.str_val.size(), "strict");
+      if (!s) {
+        PyErr_Clear();
+        throw etnp::EtException(etnp::EtError{etnp::ErrorKind::Execution,
+            "method '" + method + "' output " + std::to_string(index) +
+            " is a string that is not valid UTF-8", ""});
+      }
+      return nb::steal(s);
+    }
     case etnp::OutputKind::Tensor: break;  // fall through to the ndarray path
   }
   etnp::NpDtype d = etnp::scalar_type_to_numpy(v.scalar_type);
@@ -147,7 +161,8 @@ NB_MODULE(_core, m) {
           return self.run_method(name, descs);
         }();
         nb::list out;
-        for (const auto& v : fr.outputs()) out.append(copy_out(v));
+        const auto& views = fr.outputs();
+        for (size_t i = 0; i < views.size(); ++i) out.append(copy_out(views[i], name, i));
         return out;  // held[] (keepalives) drop here, after outputs copied
       })
       .def("method_meta", [](Runtime& self, const std::string& n) {
